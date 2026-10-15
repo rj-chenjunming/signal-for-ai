@@ -417,16 +417,15 @@ jump:
 `chrome.tabs.update({active:true})` + `chrome.windows.update({focused:true})` 操作你日常浏览器里
 的真实标签。
 
-### 装一次（约 30 秒）
+### 装一次（约 10 秒）
 
 1. Chrome 地址栏输入 `chrome://extensions`
 2. 右上角开启 **开发者模式**
-3. 点 **加载已解压的扩展程序** → 选择本仓库的 `extension/` 目录
+3. 把 `extension/` **整个文件夹拖到页面上**（松手即装）；或点「加载已解压的扩展程序」选择该目录
 
-> 仓库里也带了一份签名的 `extension/crx/*.crx`（扩展 ID 固定），但 **Windows/macOS 上装不上** ——
-> Chrome 要求扩展携带 Web Store 来源证明，自打包的 `.crx` 会报 `CRX_REQUIRED_PROOF_MISSING`。
-> 所以 Windows 上的正确方式就是上面这 3 步；`.crx` 的实际用途（企业策略部署 / Linux-macOS /
-> 可复现产物）见 [`extension/README.md`](./extension/README.md)。
+> 拖文件夹与本项目的「加载已解压」等价，是最省事的方式。
+> ⚠️ **拖文件夹、不要拖 `.crx`**：Chrome 要求扩展带 Web Store 来源证明，自打包的 `.crx` 会报
+> `CRX_REQUIRED_PROOF_MISSING`（仓库里那份 `.crx` 的用途见 [`extension/README.md`](./extension/README.md)）。
 
 然后在任务里打开这个开关：
 
