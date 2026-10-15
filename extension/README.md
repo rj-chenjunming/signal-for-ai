@@ -9,7 +9,7 @@
 | 方案 | 能否操作你的**日常浏览器** | 代价 |
 |---|---|---|
 | CDP `--remote-debugging-port` | ❌ | Chrome 136 起，**默认用户数据目录下该端口被静默忽略**（实测 Chrome 139 报 `DevTools remote debugging requires a non-default data directory`）→ 只能开一个"专用调试实例"，碰不到你平时的 Chrome |
-| **本扩展** | ✅ | 需要装一次扩展（加载已解压目录） |
+| **本扩展** | ✅ | 需装一次扩展：Windows 走「加载已解压的扩展程序」（`.crx` 被 Chrome 的来源证明要求挡住，见下文） |
 
 指示灯里的 `jump.openUrlDebugPort`（CDP 路线）代码保留着，在"专用调试实例"场景下仍可用；但在**日常浏览器**里精确切标签，只有本扩展这条路。
 
@@ -24,6 +24,49 @@
 5. 列表里出现「**AI 任务指示灯 · 标签切换桥**」即安装成功。
 
 > 不需要重启 Chrome。装好后扩展会立刻开始轮询指示灯（指示灯没起时会安静重试，不会报错刷屏）。
+
+---
+
+## 打包成 `.crx`（已随仓库提供）
+
+仓库里带了一份**签名版**产物：
+
+```
+extension/crx/ai-task-indicator-tab-bridge.crx
+```
+
+扩展 ID：`nnddcphghhpceiemgiojbpphplbiohff`
+
+重新打包：
+
+```bash
+node scripts/pack-extension.mjs
+```
+
+该脚本调用 Chrome 自己的 `--pack-extension`（不自己拼 CRX3 —— 签名覆盖的字节序列含长度字段，
+自己写很容易错一个字节就变成"文件损坏"），复用已有密钥以保证 **ID 稳定**，并校验产物确实是
+CRX3 + 内嵌 zip。
+
+> 密钥在 `extension/crx/*.pem`，**已在 `.gitignore` 中，绝不要提交**：
+> 换密钥 = 换扩展 ID，用户之前授予的权限与站点访问会全部重置。
+
+### ⚠️ 但 Windows 上装不上 —— 这是 Chrome 的限制，不是打包错了
+
+Chrome 要求扩展携带 **Web Store 来源证明**（proof of origin）。自打包的 `.crx` 没有这个证明，
+在 **Windows / macOS** 上安装会报：
+
+```
+CRX_REQUIRED_PROOF_MISSING
+```
+
+所以请**不要**把 `.crx` 当成"一键安装包"。它真正的用途是：
+
+- 企业策略部署（`ExtensionSettings` / `ExtensionInstallForcelist`，需自建更新清单 URL）；
+- Linux / macOS 上可拖入 `chrome://extensions` 安装；
+- 作为**带固定 ID 的可复现产物**归档。
+
+**Windows 用户的正确安装方式，仍然是上面那 4 步「加载已解压的扩展程序」。**
+想要真正的一键安装，只有发布到 Chrome Web Store（需开发者账号，且上传的是 **zip** 而不是 `.crx`）。
 
 ---
 

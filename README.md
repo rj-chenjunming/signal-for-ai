@@ -423,6 +423,11 @@ jump:
 2. 右上角开启 **开发者模式**
 3. 点 **加载已解压的扩展程序** → 选择本仓库的 `extension/` 目录
 
+> 仓库里也带了一份签名的 `extension/crx/*.crx`（扩展 ID 固定），但 **Windows/macOS 上装不上** ——
+> Chrome 要求扩展携带 Web Store 来源证明，自打包的 `.crx` 会报 `CRX_REQUIRED_PROOF_MISSING`。
+> 所以 Windows 上的正确方式就是上面这 3 步；`.crx` 的实际用途（企业策略部署 / Linux-macOS /
+> 可复现产物）见 [`extension/README.md`](./extension/README.md)。
+
 然后在任务里打开这个开关：
 
 ```yaml
@@ -512,11 +517,13 @@ docs/           PRD、架构设计、POC 报告
 
 | 文件 | 内容 |
 |------|------|
-| **[`docs/04-SPEC.md`](./docs/04-SPEC.md)** | **需求规格说明（推荐先读这份）** —— 功能需求、状态机规格、已踩过的坑、当前状态、下一步 |
-| **[`docs/05-NEXT-PROMPT.md`](./docs/05-NEXT-PROMPT.md)** | **下一步开发提示词** —— 可直接复制给 AI 执行 |
+| **[`docs/design-decisions.md`](./docs/design-decisions.md)** | **决策台账（87 条，推荐先读这份）** —— 每条记了"发现了什么、为什么这么选、踩了什么坑" |
+| **[`docs/04-SPEC.md`](./docs/04-SPEC.md)** | **需求规格说明** —— 功能需求、状态机规格、当前状态、下一步 |
+| [`docs/05-NEXT-PROMPT.md`](./docs/05-NEXT-PROMPT.md) | 下一步开发提示词，可直接复制给 AI 执行 |
 | [`docs/01-PRD.md`](./docs/01-PRD.md) | 产品需求、竞品选型结论、配置 schema |
 | [`docs/02-ARCHITECTURE.md`](./docs/02-ARCHITECTURE.md) | 架构设计、任务分解、类型契约 |
-| [`docs/03-POC-REPORT.md`](./docs/03-POC-REPORT.md) | Windows API 实测报告（含本README「已知限制」的证据） |
+| [`docs/03-POC-REPORT.md`](./docs/03-POC-REPORT.md) | Windows API 实测报告（含本 README「已知限制」的证据） |
+| [`docs/round*.md`](./docs/) | 逐轮开发记录（21 篇）：每轮修了什么真实缺陷、实测拿到了什么结论 |
 
 ## License
 
