@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      CSP：本地可信页面，但仍限制为自身资源，禁止任何远程加载。
+      注意 script-src 用 'self'，因为 preload 注入的 API 在隔离世界里，
+      页面自身的 JS 仍是普通 script。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;"
+    />
+    <title>AI 任务指示灯</title>
+    <link rel="stylesheet" href="./shared.css" />
+  </head>
+  <!-- data-indicator-role 由 preload 读取，用于区分 overlay / panel -->
+  <body data-indicator-role="overlay" class="overlay-body">
+    <div class="lamp-stage">
+      <!--
+        拖拽区与点击区分离（架构 §1.3）：
+        - .lamp-drag 用 -webkit-app-region: drag，由 Chromium 直接处理，零 IPC 开销
+        - .lamp-core  正常响应点击，用于展开/收起面板
+      -->
+      <div class="lamp-drag" title="拖动可移动位置">
+        <!--
+          两种形态二选一（设计决策 D6）：
+          - 单灯模式（默认）：一个总灯，最小干扰
+          - 灯带模式：总灯 + 每端口一盏 14px 小灯 + 端口号
+          由 overlay.js 按 snapshot.stripMode 切换 hidden。
+        -->
+        <div class="lamp-core" id="lamp-core">
+          <div class="lamp-dot" id="lamp-dot"></div>
+          <div class="lamp-badge" id="lamp-badge" hidden>0</div>
+        </div>
+
+        <!-- 灯带模式容器。子节点由 overlay.js 按快照重建。 -->
+        <div class="lamp-strip" id="lamp-strip" hidden>
+          <div class="strip-master">
+            <div class="strip-master-dot" id="strip-master-dot"></div>
+            <span class="strip-master-label" id="strip-master-label">全部</span>
+            <div class="lamp-badge" id="strip-master-badge" hidden>0</div>
+          </div>
+          <div class="strip-rows" id="strip-rows"></div>
+        </div>
+      </div>
+    </div>
+    <!--
+      临时提示条：只用于「配置已重载」这类一次性通知，**不是**悬停 tooltip。
+      悬停提示已按用户要求移除（「鼠标放上去就不需要文字提示了 乱糟糟的」）——
+      状态由圆点颜色 + 端口标签表达，明细请打开面板查看。
+    -->
+    <div class="lamp-toast" id="lamp-toast" aria-live="polite"></div>
+
+    <!-- audio.js 必须先于 overlay.js 加载：它把音效接口挂到 window.aiIndicatorAudio -->
+    <script src="./audio.js"></script>
+    <script src="./overlay.js"></script>
+  </body>
+</html>

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;"
+    />
+    <title>AI 任务指示灯 — 任务列表</title>
+    <link rel="stylesheet" href="./shared.css" />
+  </head>
+  <body data-indicator-role="panel" class="panel-body">
+    <header class="panel-header">
+      <div class="panel-title">AI 任务指示灯</div>
+      <div class="panel-header-actions">
+        <button class="icon-btn" id="btn-pause" title="暂停/恢复监控" aria-label="暂停或恢复监控">
+          ⏸
+        </button>
+        <button class="icon-btn" id="btn-close" title="收起面板" aria-label="收起面板">✕</button>
+      </div>
+    </header>
+
+    <div class="panel-summary" id="panel-summary">
+      <span class="summary-item" data-status="running">
+        <i class="summary-dot"></i><span class="summary-label">运行中</span>
+        <span class="summary-count" id="count-running">0</span>
+      </span>
+      <span class="summary-item" data-status="waiting">
+        <i class="summary-dot"></i><span class="summary-label">等待授权</span>
+        <span class="summary-count" id="count-waiting">0</span>
+      </span>
+      <span class="summary-item" data-status="success">
+        <i class="summary-dot"></i><span class="summary-label">已完成</span>
+        <span class="summary-count" id="count-success">0</span>
+      </span>
+      <span class="summary-item" data-status="failed">
+        <i class="summary-dot"></i><span class="summary-label">失败</span>
+        <span class="summary-count" id="count-failed">0</span>
+      </span>
+    </div>
+
+    <main class="panel-list" id="panel-list" role="list">
+      <!-- 任务行由 panel.ts 渲染 -->
+    </main>
+
+    <div class="panel-empty" id="panel-empty" hidden>
+      <p class="empty-title">暂无任务</p>
+      <p class="empty-hint">
+        请在配置文件中添加任务：<br />
+        <code id="config-path-hint">%USERPROFILE%\.ai-task-indicator\config.yaml</code>
+      </p>
+      <p class="empty-hint">托盘菜单 →「打开配置文件」可直接定位</p>
+    </div>
+
+    <footer class="panel-footer">
+      <span id="panel-hint">点击行内按钮可跳转现场 · Esc 收起</span>
+    </footer>
+
+    <script src="./panel.js"></script>
+  </body>
+</html>

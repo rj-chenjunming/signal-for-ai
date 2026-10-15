@@ -1,0 +1,25 @@
+{
+  // 说明：测试代码的类型检查配置。
+  //
+  // 【为什么需要独立一份】
+  // tsconfig.json 的 rootDir 是 src，只编译主进程/preload/共享层；
+  // tsconfig.electron.json 只编译渲染层。两者都不含 test/，
+  // 于是测试代码长期处于「类型检查盲区」——
+  // 写错字段名（如把 sink 误传成 onState）也不会报错，
+  // 只能等运行时静默不触发才发现。加这份配置把盲区补上。
+  //
+  // 注意：这里**不使用 `as never`**。它会让整个对象逃出类型检查，
+  // 正是它掩盖过真实 bug 的原因。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "types": ["node", "vitest/globals"],
+    // 测试里允许用as const 等断言辅助类型，但禁止 never 逃逸：
+    // 这里通过 lint 注释提醒，实际靠 code review 保证。
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["test/**/*.ts", "src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "dist-renderer"]
+}

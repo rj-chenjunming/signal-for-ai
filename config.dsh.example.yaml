@@ -1,0 +1,135 @@
+version: 1
+app:
+  startMinimized: true
+  autoLaunch: false
+  pollIntervalMs: 3000
+  locale: zh-CN
+  processPollMode: resident
+  hookPort: 17890
+  dshHome: "%USERPROFILE%/.dsh"
+lamp:
+  enabled: true
+  x: 3650
+  y: 111
+  size: 28
+  opacity: 0.92
+  alwaysOnTop: true
+  showBadge: true
+  clickThrough: false
+  resetOnSuccess: true
+notify:
+  popup: true
+  sound: true
+  soundOnlyOnFailure: false
+  debounceMs: 30000
+  notifyStates:
+    - waiting
+    - failed
+    - success
+  doNotDisturbOnFullscreen: true
+  actions:
+    - id: focus_terminal
+      label: 打开终端
+    - id: open_log
+      label: 打开日志
+    - id: open_dir
+      label: 打开目录
+tasks:
+  - id: dsh-local
+    name: dsh（本地客户端）
+    enabled: true
+    monitor:
+      type: dsh
+      authority: 127.0.0.1:19387
+      intervalMs: 5000
+      timeoutMs: 8000
+      heartbeatTimeoutMs: 120000
+      allowPlanPendingHeuristic: true
+    jump:
+      cwd: D:/your-project
+      terminal:
+        type: windowTitle
+        match: DeepSeek Harness
+        processNames:
+          - DeepSeek Harness
+    shortLabel: 本地客户端
+  - id: dsh-web
+    name: dsh（web 13080）
+    enabled: true
+    monitor:
+      type: dsh
+      authority: 127.0.0.1:13080
+      sshHost: user@your-host
+      intervalMs: 10000
+      timeoutMs: 10000
+    jump:
+      cwd: D:/your-project
+      openUrl: http://127.0.0.1:13080
+      openUrlViaExtension: true
+    shortLabel: web 13080
+  - id: dsh-plugin-3080
+    name: dsh @ 3080（插件精确信号）
+    enabled: false
+    monitor:
+      type: webhook
+      listen: 127.0.0.1
+      path: /hook/dsh-plugin-3080
+      secret: change-me-local-token
+      fieldMap:
+        state: $.status
+        message: $.message
+      heartbeatTimeoutMs: 300000
+    jump:
+      cwd: D:/your-project
+  - id: process-demo
+    name: 进程示例（notepad）
+    enabled: false
+    monitor:
+      type: process
+      match:
+        - processNames:
+            - notepad.exe
+        - processNames:
+            - node.exe
+          cmdlineContains:
+            - my-worker
+      onExit:
+        successExitCodes:
+          - 0
+        graceMs: 3000
+      fallbackLog:
+        paths:
+          - "%USERPROFILE%/.notepad-demo/logs/*.log"
+        stateOnNewLine: running
+    jump:
+      cwd: D:/your-project
+  - id: workbuddy
+    name: WorkBuddy
+    enabled: true
+    monitor:
+      type: sqlite
+      database: D:/your-appdata/.workbuddy/workbuddy.db
+      activeStatus: working
+      activeWithinMs: 120000
+      notifyOnDone: true
+      intervalMs: 5000
+      maxFailures: 3
+      requireProcess:
+        - processNames:
+            - WorkBuddy.exe
+        - processNames:
+            - node.exe
+          cmdlineContains:
+            - .workbuddy
+    jump:
+      cwd: D:/workbuddy
+      terminal:
+        type: windowTitle
+        match: WorkBuddy
+defaults:
+  stateTimeout:
+    startTimeoutMs: 10000
+    staleTimeoutMs: 60000
+    waitingTimeoutMs: 1800000
+    dismissAfterMs: 600000
+  colors: {}

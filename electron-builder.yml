@@ -1,0 +1,40 @@
+# electron-builder 打包配置（PRD D5：NSIS）
+# 依赖: electron-builder ^25（devDependency）
+appId: com.aitaskindicator.app
+productName: AI Task Indicator
+copyright: Copyright © 2026 ai-task-indicator
+
+directories:
+  output: release
+  buildResources: build
+
+# 只打包编译产物与运行时必需的静态文件；不把 config.yaml 打进去（用户配置在 %USERPROFILE%）
+files:
+  - dist/**/*
+  - package.json
+  - '!**/*.map'
+  - '!node_modules/**/*'
+
+asar: true
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: AI-Task-Indicator-Setup-${version}.${ext}
+  # 关闭签名以免无证书时打包失败；正式发布请配置 certificateFile
+  signAndEditExecutable: true
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: AI 任务指示灯
+  # 开机自启走 app.setLoginItemSettings()（架构 A10），不写注册表；此处仅声明安装/卸载行为
+  runAfterFinish: true
+
+# 主进程异常时保留托盘灯（架构 §8.4 全局兜底：崩溃不崩灯）
+asarUnpack: []

@@ -1,0 +1,27 @@
+{
+  // 说明：主进程 + preload 编译配置（架构 D2 决策：tsc 直编，不引入 Vite）。
+  // 主进程与 preload 都是纯 Node 代码，无需打包器；渲染层由 tsconfig.electron.json 单独编译。
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "lib": ["ES2022", "DOM"],  // preload 需要 document 判定窗口角色
+    "types": ["node"],
+    "rootDir": "src",
+    "outDir": "dist",
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "declaration": false,
+    "sourceMap": true,
+    "removeComments": false
+  },
+  "include": ["src/main/**/*.ts", "src/preload/**/*.ts", "src/shared/**/*.ts"],
+  "exclude": ["node_modules", "dist", "src/renderer"]
+}

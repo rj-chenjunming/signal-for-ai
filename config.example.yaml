@@ -1,0 +1,211 @@
+# ============================================================================
+# AI 任务状态指示灯 — 配置示例
+#
+# 复制本文件为 config.yaml 后按需修改。三类监控方式各给了一个真实可跑的
+# 任务示例，可直接启用验证：
+#   1. process 型→ 监控本机 workbuddy 进程存活
+#   2. log 型     → 轮询 dsh harness 的日志目录，用正则判定成功/失败
+#   3. webhook 型 → 接收外部脚本 POST 的状态回调（curl 可直接测试）
+#
+# 字段名与 src/shared/types.ts 的类型定义严格一致；未列出的字段会走
+# defaults（见 shared/constants.ts）。单个字段非法只会丢弃该字段并记日志，
+# 不会导致应用崩溃（见 main/config.ts 的 validateConfig）。
+# ============================================================================
+
+version: 1
+
+# ---------------------------------------------------------------------------
+# 应用级设置
+# ---------------------------------------------------------------------------
+app:
+  # 启动时只显示托盘，不弹出悬浮灯与面板
+  startMinimized: true
+  # 开机自启（等价于托盘菜单「开机自启」）
+  autoLaunch: false
+  # process / log 监控器的轮询间隔（毫秒）
+  pollIntervalMs: 3000
+  # process 监控模式：
+  #   resident = 长驻一个 PowerShell 子进程，逐行输出 JSON（POC 实测推荐，开销最低）
+  #   onDemand = 每轮 spawn 一次，内存更省但更慢（实测进程创建有固定开销）
+  processPollMode: resident
+  # webhook 接收端口（各任务需与此一致，或在任务里单独指定 listen）
+  hookPort: 17890
+  locale: zh-CN
+
+# ---------------------------------------------------------------------------
+# 悬浮指示灯设置
+# ---------------------------------------------------------------------------
+lamp:
+  enabled: true
+  # 屏幕坐标，-1 表示首次运行用默认位置（右上角）
+  x: -1
+  y: 60
+  # 灯直径（像素）
+  size: 28
+  opacity: 0.92
+  alwaysOnTop: true
+  # 是否显示「运行中任务数」徽标
+  showBadge: true
+  # true = 鼠标穿透（灯不拦截点击，需从托盘菜单打开面板）
+  clickThrough: false
+  # 全部任务成功后灯是否回到 idle
+  resetOnSuccess: true
+
+# ---------------------------------------------------------------------------
+# 通知设置（弹窗 + 提示音，均可单独关闭）
+# ---------------------------------------------------------------------------
+notify:
+  popup: true
+  sound: true
+  # true = 只在失败时响，成功/等待静默
+  soundOnlyOnFailure: false
+  # 同一任务的重复通知去抖间隔（毫秒），避免日志高频命中时刷屏
+  debounceMs: 30000
+  # 哪些状态触发通知（waiting=等待你确认，AI CLI 最容易卡在这一态）
+  notifyStates:
+    - waiting
+    - success
+    - failed
+  # 全屏时不弹通知（避免打断演示/游戏）
+  doNotDisturbOnFullscreen: true
+  # 通知上的操作按钮，最多 3 个
+  actions:
+    - id: focus_terminal
+      label: 打开终端
+    - id: open_log
+      label: 打开日志
+    - id: open_dir
+      label: 打开目录
+  # 可选：自定义提示音文件（绝对路径）。不填则用 Web Audio 实时合成，
+  # 三种状态音色不同，无需分发音频资源。
+  # soundFile: C:/sounds/done.wav
+
+# ---------------------------------------------------------------------------
+# 全局默认值，可被单个任务覆盖
+# ---------------------------------------------------------------------------
+defaults:
+  stateTimeout:
+    # starting 态多久无新信号后回落到 idle
+    startTimeoutMs: 10000
+    # 信号静默多久后判为 unknown（防「灯一直绿」）
+    staleTimeoutMs: 60000
+    # waiting 态悬挂保护
+    waitingTimeoutMs: 1800000
+    # success 后多久自动清理回idle
+    dismissAfterMs: 600000
+  # 覆盖状态色（不填则用内置值）。单一来源在 shared/constants.ts 的
+  # STATUS_COLOR，这里只允许覆盖你真正想改的项。
+  colors: {}
+  #    failed: "#FF3B30"
+
+# ---------------------------------------------------------------------------
+# 任务列表
+#
+# 三个示例任务已 enabled: false，默认不激活，避免首次运行就报错。
+# 验证时请把对应任务的 enabled 改成 true。
+# ---------------------------------------------------------------------------
+tasks:
+  # =========================================================================
+  # 示例 1 — process 型：监听本机进程/命令行参数
+  # =========================================================================
+  - id: workbuddy
+    name: WorkBuddy 主进程
+    enabled: false
+    monitor:
+      type: process
+      # match 数组之间是「或」，单个 match 内的 processNames 与
+      # cmdlineContains 之间是「与」。进程名比较忽略大小写。
+      match:
+        - processNames:
+            - node.exe
+            - workbuddy.exe
+          # 只有命令行同时包含这些子串才算命中，避免误抓所有 node.exe
+          cmdlineContains:
+            - workbuddy
+      # 进程消失后的结果判定
+      onExit:
+        # 退出码 0 视为成功，其余视为失败
+        successExitCodes:
+          - 0
+        # 消失后等3s 再定状态，留出日志刷尾时间
+        graceMs: 3000
+      # 无匹配进程时的兜底信号源（应对 node.exe 名字被复用）
+      fallbackLog:
+        paths:
+          - "%USERPROFILE%/.workbuddy/logs/*.log"
+        stateOnNewLine: running
+    jump:
+      # POC 实测：窗口级聚焦可行，切到「指定历史标签页」不可行。
+      # 这里的 windowTitle 只作为最后兜底（实测存在重名窗口）。
+      terminal:
+        type: windowTitle
+        match: WorkBuddy
+      cwd: "%USERPROFILE%"
+      logFile: ""
+
+  # =========================================================================
+  # 示例 2 — log 型：轮询日志文件/目录变化 + 正则判定状态
+  # =========================================================================
+  - id: dsh-harness
+    name: dsh harness 仿真任务
+    enabled: false
+    monitor:
+      type: log
+      # 支持 ** 递归通配
+      paths:
+        - "D:/projects/demo/**/*.log"
+      readMode: tail
+      # 首次接入只读文件末尾 64KB，避免全量重扫大文件
+      fromEndBytes: 65536
+      # rules 按数组顺序匹配，命中即返回该状态；
+      # failed 会被引擎做优先级提升，放在哪里都能正确命中。
+      rules:
+        - state: failed
+          match: "(error|fatal|exception|failed|\\bE[0-9]{4}\\b)"
+        - state: waiting
+          # AI CLI 等待授权/等待确认的典型信号
+          match: "(permission request|waiting for (user|input|approval)|needs?_input|请确认|等待授权)"
+        - state: success
+          match: "(task complete|completed successfully|all tests passed|done|完成|✓)"
+        - state: running
+          match: "(running|executing|subagent|tool call|step [0-9]+)"
+      # 日志静默超过此时长转 idle（防长尾任务一直显示在跑）
+      idleAfterSilenceMs: 60000
+      staleTimeoutMs: 120000
+    jump:
+      terminal:
+        # 直接 spawn 命令打开终端（首选路径，零中间层开销）
+        type: spawn
+        cmd: wt.exe
+        args:
+          - new-tab
+          - -d
+          - "D:/projects/demo"
+      cwd: "D:/projects/demo"
+      logFile: ""
+      openWith: notepad.exe
+
+  # =========================================================================
+  # 示例 3 — webhook 型：接收外部状态回调
+  # =========================================================================
+  - id: remote-agent
+    name: 远程 Agent 任务
+    enabled: false
+    monitor:
+      type: webhook
+      # 强制 loopback，不会监听 0.0.0.0
+      listen: 127.0.0.1
+      # 端点：POST /hook/:taskId，这里的 :taskId 会被下面的任务 id 替换
+      path: /hook/remote-agent
+      # 请求头 x-indicator-token 必须匹配。留空则不校验（仅本机可用时）
+      secret: change-me-local-token
+      # 从 JSON payload 提取字段，支持 $.a.b 语法
+      fieldMap:
+        state: $.status
+        message: $.message
+        progress: $.progress
+      # 心跳超时：超过此时长没收到推送则转 unknown
+      heartbeatTimeoutMs: 120000
+    jump:
+      cwd: "D:/projects/demo"
+      logFile: ""

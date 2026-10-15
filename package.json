@@ -1,0 +1,38 @@
+{
+  "name": "ai-task-indicator",
+  "version": "1.0.0",
+  "description": "AI 任务状态指示灯 — 实时监控多个 AI 工具并行任务的执行状态（托盘 + 悬浮灯 + 通知 + 点击跳转）",
+  "main": "dist/main/index.js",
+  "author": "ai-task-indicator team",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "build": "npm run build:main && npm run build:renderer && npm run build:assets",
+    "build:main": "tsc -p tsconfig.json",
+    "build:renderer": "tsc -p tsconfig.electron.json",
+    "build:assets": "node scripts/copy-renderer.mjs",
+    "dev": "npm run build && electron .",
+    "dev:example": "npm run build && electron . --config ./config.example.yaml",
+    "start": "node scripts/start.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dist": "npm run build && electron-builder --win nsis",
+    "smoke": "node scripts/smoke-e2e.js",
+    "start:demo": "node scripts/start.mjs -- --config ./config.demo.yaml"
+  },
+  "dependencies": {
+    "electron": "^33.0.0",
+    "yaml": "^2.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "electron-builder": "^25.1.8",
+    "electron-log": "^5.2.4",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

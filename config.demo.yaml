@@ -1,0 +1,113 @@
+version: 1
+app:
+  startMinimized: true
+  autoLaunch: false
+  pollIntervalMs: 3000
+  locale: zh-CN
+  processPollMode: resident
+  hookPort: 17890
+lamp:
+  enabled: true
+  x: 1844
+  y: 60
+  size: 28
+  opacity: 0.92
+  alwaysOnTop: true
+  showBadge: true
+  clickThrough: false
+  resetOnSuccess: true
+notify:
+  popup: true
+  sound: true
+  soundOnlyOnFailure: false
+  debounceMs: 30000
+  notifyStates:
+    - waiting
+    - success
+    - failed
+  doNotDisturbOnFullscreen: true
+  actions:
+    - id: focus_terminal
+      label: 打开终端
+    - id: open_log
+      label: 打开日志
+    - id: open_dir
+      label: 打开目录
+tasks:
+  - id: workbuddy
+    name: WorkBuddy 主进程
+    enabled: true
+    monitor:
+      type: process
+      match:
+        - processNames:
+            - node.exe
+            - workbuddy.exe
+          cmdlineContains:
+            - workbuddy
+      onExit:
+        successExitCodes:
+          - 0
+        graceMs: 3000
+      fallbackLog:
+        paths:
+          - "%USERPROFILE%/.workbuddy/logs/*.log"
+        stateOnNewLine: running
+    jump:
+      cwd: "%USERPROFILE%"
+      terminal:
+        type: windowTitle
+        match: WorkBuddy
+  - id: dsh-harness
+    name: dsh harness 仿真任务
+    enabled: true
+    monitor:
+      type: log
+      paths:
+        - D:/projects/demo/**/*.log
+      rules:
+        - state: failed
+          match: (error|fatal|exception|failed|\bE[0-9]{4}\b)
+        - state: waiting
+          match: (permission request|waiting for
+            (user|input|approval)|needs?_input|请确认|等待授权)
+        - state: success
+          match: (task complete|completed successfully|all tests passed|done|完成|✓)
+        - state: running
+          match: (running|executing|subagent|tool call|step [0-9]+)
+      readMode: tail
+      fromEndBytes: 65536
+      idleAfterSilenceMs: 60000
+      staleTimeoutMs: 120000
+    jump:
+      cwd: D:/projects/demo
+      openWith: notepad.exe
+      terminal:
+        type: spawn
+        cmd: wt.exe
+        args:
+          - new-tab
+          - -d
+          - D:/projects/demo
+  - id: remote-agent
+    name: 远程 Agent 任务
+    enabled: true
+    monitor:
+      type: webhook
+      listen: 127.0.0.1
+      path: /hook/remote-agent
+      secret: demo-token-123
+      fieldMap:
+        state: $.status
+        message: $.message
+        progress: $.progress
+      heartbeatTimeoutMs: 120000
+    jump:
+      cwd: D:/projects/demo
+defaults:
+  stateTimeout:
+    startTimeoutMs: 10000
+    staleTimeoutMs: 60000
+    waitingTimeoutMs: 1800000
+    dismissAfterMs: 600000
+  colors: {}
