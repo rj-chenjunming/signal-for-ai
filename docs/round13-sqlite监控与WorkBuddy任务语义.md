@@ -17,7 +17,7 @@ WorkBuddy 是常驻 Electron 应用，所以只要窗口开着就永远蓝灯 �
 | 信号源 | 结论 |
 |---|---|
 | `~/.workbuddy/logs/automation.log` | ❌ 一个月只有 **1 次** `run start`，且只覆盖"定时任务" |
-| `D:\projects\.workbuddy\logs\main.log` | ❌ 全是 `HeapTrim`/`PerfMetrics` 噪声，无任务级事件 |
+| `D:\your-appdata\.workbuddy\logs\main.log` | ❌ 全是 `HeapTrim`/`PerfMetrics` 噪声，无任务级事件 |
 | **`workbuddy.db` → `sessions` 表** | ✅ **有 `status` + `last_activity_at`** |
 | `workbuddy.db` → `automation_runtime_state` | ✅ `running=0/1`（但只覆盖定时任务） |
 

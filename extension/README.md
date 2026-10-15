@@ -38,21 +38,13 @@
 
 ---
 
-## 打包成 `.crx`（已随仓库提供）
-
-仓库里带了一份**签名版**产物：
-
-```
-extension/crx/ai-task-indicator-tab-bridge.crx
-```
-
-扩展 ID：`nnddcphghhpceiemgiojbpphplbiohff`
-
-重新打包：
+## 打包成 `.crx`（可选；仓库不附带产物）
 
 ```bash
 node scripts/pack-extension.mjs
 ```
+
+产物落在 `extension/crx/`，该目录**已 gitignore**（原因见下：Windows / macOS 装不了它）。
 
 该脚本调用 Chrome 自己的 `--pack-extension`（不自己拼 CRX3 —— 签名覆盖的字节序列含长度字段，
 自己写很容易错一个字节就变成"文件损坏"），复用已有密钥以保证 **ID 稳定**，并校验产物确实是
@@ -76,7 +68,7 @@ CRX_REQUIRED_PROOF_MISSING
 - Linux / macOS 上可拖入 `chrome://extensions` 安装；
 - 作为**带固定 ID 的可复现产物**归档。
 
-**Windows 用户的正确安装方式，仍然是上面那 4 步「加载已解压的扩展程序」。**
+**Windows 用户的正确安装方式，仍然是上面的「把 `extension/` 文件夹拖进 `chrome://extensions`」。**
 想要真正的一键安装，只有发布到 Chrome Web Store（需开发者账号，且上传的是 **zip** 而不是 `.crx`）。
 
 ---

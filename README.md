@@ -425,7 +425,8 @@ jump:
 
 > 拖文件夹与本项目的「加载已解压」等价，是最省事的方式。
 > ⚠️ **拖文件夹、不要拖 `.crx`**：Chrome 要求扩展带 Web Store 来源证明，自打包的 `.crx` 会报
-> `CRX_REQUIRED_PROOF_MISSING`（仓库里那份 `.crx` 的用途见 [`extension/README.md`](./extension/README.md)）。
+> `CRX_REQUIRED_PROOF_MISSING`。仓库**不附带** `.crx`；确实需要时用
+> `node scripts/pack-extension.mjs` 自行生成（详见 [`extension/README.md`](./extension/README.md)）。
 
 然后在任务里打开这个开关：
 
@@ -523,6 +524,11 @@ docs/           PRD、架构设计、POC 报告
 | [`docs/02-ARCHITECTURE.md`](./docs/02-ARCHITECTURE.md) | 架构设计、任务分解、类型契约 |
 | [`docs/03-POC-REPORT.md`](./docs/03-POC-REPORT.md) | Windows API 实测报告（含本 README「已知限制」的证据） |
 | [`docs/round*.md`](./docs/) | 逐轮开发记录（21 篇）：每轮修了什么真实缺陷、实测拿到了什么结论 |
+
+> **这些文档是一份副本。** 在本机的原始工作区里，它们的编辑位置在仓库之外（工作区根 `docs/`），
+> 同步进仓库靠 `node scripts/sync-docs.mjs` —— 它会顺带做**自动脱敏**、**台账编号校验**
+> （1..N 无缺号/重复）与**个人信息残留扫描**（有残留即非零退出）；`--check` 只比对不写文件，可挂 CI。
+> 若你只是读这个仓库，直接用仓库里这份即可。
 
 ## License
 
