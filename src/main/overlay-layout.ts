@@ -220,23 +220,73 @@ export function compactCanvasSize(
   };
 }
 
+/** 一个屏幕矩形（工作区或显示器边界都用它）。 */
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** 工作区三条边里，哪些是"真正的屏幕边"（边外没有另一块显示器）。 */
+export interface ScreenEdges {
+  top: boolean;
+  left: boolean;
+  right: boolean;
+}
+
+/**
+ * 判断工作区的上/左/右三条边里，哪些是**真正的屏幕边**。
+ *
+ * 【为什么必须区分 —— 这是用户实测报上来的 bug】
+ * "距离为负"（窗口探出这条边）有两种完全不同的情形：
+ *
+ *  1. **在屏幕边上继续往外推**：鼠标被屏幕边挡住，窗口必然探出去一点
+ *     （实测用户把灯拖到右边缘时 x=3702，而屏幕 3840、窗口 164 ——
+ *      右边缘本该 3676，实际探出 26px）。这是**正常**的贴边动作。
+ *  2. **跨屏摆放**：窗口一半在主屏、一半在副屏，压在**两块屏的交界**上。
+ *     这不是贴边，用户只是把灯放在了两屏之间。
+ *
+ * 只看距离正负分不开这两者 —— 必须看这条边外面**还有没有别的屏**。
+ * 第一版没做这个区分，先误判了情形 2（D90），修完又把情形 1 一起误杀了，
+ * 表现就是用户报的"顶部可以、左右侧不行"。
+ */
+export function screenEdgesFor(
+  workArea: Rect,
+  displays: Rect[],
+  center: { x: number; y: number },
+): ScreenEdges {
+  /** 该点是否落在任何一块显示器上。 */
+  const covered = (x: number, y: number): boolean =>
+    displays.some((d) => x >= d.x && x < d.x + d.width && y >= d.y && y < d.y + d.height);
+
+  return {
+    // 探出这条边的那个点若被别的屏覆盖，说明它是屏内交界，不是屏幕边
+    left: !covered(workArea.x - 1, center.y),
+    right: !covered(workArea.x + workArea.width, center.y),
+    top: !covered(center.x, workArea.y - 1),
+  };
+}
+
 /**
  * 由窗口位置判定停靠方向（纯函数，可单测）。
  *
  * 只看**上 / 左 / 右**三条边（用户要的是"侧边或顶部"；贴底部不改变形态）。
  * 距离取最近的一条；**并列时顶部优先** —— 左上角那种情况横排更自然也更好认。
  *
- * ⚠️ 距离必须落在 **0 ~ 阈值**：窗口"越过"这条边（距离为负）**不算**贴边。
- * 这条判据来自实测踩的坑 —— 用户的灯在 x=1768、宽 164，右边缘 1932 正好压过
- * 主屏右边界 1920、探进隔壁屏 12px，此时右边缘距离算出来是 **-12**；
- * 若只判 `<= 阈值`，就会把"跨屏摆放"误判成"贴右边缘"，灯莫名缩成点阵。
+ * @param screenEdges 这三条边哪些是真正的屏幕边（见 `screenEdgesFor`）。
+ *   默认三条都是 —— 单屏用户就是这个情况。
+ *
+ * 判据：距离 ≤ 阈值即可贴边；但**距离为负**（窗口探出这条边）时，
+ * 只有该边确实是屏幕边才算 —— 否则那是"跨屏摆放"，不该改形态。
  */
 export function resolveDock(
-  bounds: { x: number; y: number; width: number; height: number },
-  workArea: { x: number; y: number; width: number; height: number },
+  bounds: Rect,
+  workArea: Rect,
+  screenEdges: ScreenEdges = { top: true, left: true, right: true },
   threshold: number = DOCK_THRESHOLD,
 ): LampDock {
-  const candidates: Array<{ dock: LampDock; distance: number }> = [
+  const candidates: Array<{ dock: 'top' | 'left' | 'right'; distance: number }> = [
     { dock: 'top', distance: bounds.y - workArea.y },
     { dock: 'left', distance: bounds.x - workArea.x },
     { dock: 'right', distance: workArea.x + workArea.width - (bounds.x + bounds.width) },
@@ -246,8 +296,10 @@ export function resolveDock(
   let bestDistance = Number.POSITIVE_INFINITY;
   for (const candidate of candidates) {
     const { distance } = candidate;
+    // 探出这条边（距离为负）时，只有真屏幕边才算贴边
+    const overshootAllowed = distance >= 0 || screenEdges[candidate.dock];
     // 严格小于 => 并列时先出现的（top）胜出
-    if (distance >= 0 && distance <= threshold && distance < bestDistance) {
+    if (overshootAllowed && distance <= threshold && distance < bestDistance) {
       bestDistance = distance;
       best = candidate.dock;
     }

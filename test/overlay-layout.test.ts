@@ -21,6 +21,7 @@ import {
   compactCanvasSize,
   resolveCanvasSize,
   resolveDock,
+  screenEdgesFor,
   stripCanvasHeight,
   stripCanvasWidth,
   stripContentHeight,
@@ -302,14 +303,27 @@ describe('resolveDock —— 贴边判定（纯函数）', () => {
     expect(resolveDock({ x: 800, y: 1080 - 117, ...size }, workArea)).toBe('none');
   });
 
-  it('★ 窗口"越过"这条边（跨屏摆放）不算贴边', () => {
-    // 实测 bug：用户的灯 x=1768、宽 164 -> 右边缘 1932，越过主屏右边界(1920)
-    // 12px。若只判 `<= 阈值`，距离 -12 会被当成"贴右边缘"，灯莫名缩成点阵。
+  it('★ 在屏幕边上继续外推（窗口探出屏幕）**仍然**算贴边', () => {
+    // 用户实测报上来的 bug：「顶层可以，左右侧不行」。
+    // 根因：拖到左右边缘时鼠标被屏幕边挡住，窗口必然探出去一点 ——
+    // 他的灯实测停在 x=3702，而屏幕 3840、窗口 164，右边缘本该 3676，探出 26px。
+    // 第一版把"距离为负"一律判成不贴边，于是左右侧全失效
+    // （顶部只是因为他没探出屏幕才侥幸能用）。
+    const screen = { x: 0, y: 0, width: 3840, height: 1040 };
+    const allEdges = { top: true, left: true, right: true };
+    expect(resolveDock({ x: 3702, y: 62, ...size }, screen, allEdges)).toBe('right');
+    expect(resolveDock({ x: -26, y: 400, ...size }, screen, allEdges)).toBe('left');
+    expect(resolveDock({ x: 800, y: -26, ...size }, screen, allEdges)).toBe('top');
+  });
+
+  it('★ 跨屏摆放（探出的是屏内交界）不算贴边', () => {
+    // 灯在 x=1768、宽 164 -> 右边缘 1932，越过主屏右边界 1920 探进隔壁屏 12px。
+    // 此时主屏右边缘**不是**屏幕边（外面还有副屏），所以不算贴边。
     const straddling = { x: 1768, y: 169, width: 164, height: 135 };
-    expect(resolveDock(straddling, workArea)).toBe('none');
-    // 负距离的所有边都不能算贴边
-    expect(resolveDock({ x: -30, y: 500, ...size }, workArea)).toBe('none');
-    expect(resolveDock({ x: 800, y: -30, ...size }, workArea)).toBe('none');
+    const d1IsNotRightmost = { top: true, left: true, right: false };
+    expect(resolveDock(straddling, workArea, d1IsNotRightmost)).toBe('none');
+    // 同样是"探出"，但边外没有别的屏（真屏幕边）就该贴 —— 区别只在这一点
+    expect(resolveDock(straddling, workArea, { top: true, left: true, right: true })).toBe('right');
   });
 
   it('工作区有偏移（任务栏/多屏负坐标）时按相对距离判定', () => {
@@ -317,6 +331,39 @@ describe('resolveDock —— 贴边判定（纯函数）', () => {
     expect(resolveDock({ x: -1920, y: 200, ...size }, shifted)).toBe('left');
     expect(resolveDock({ x: -164, y: 200, ...size }, shifted)).toBe('right');
     expect(resolveDock({ x: -1000, y: 40, ...size }, shifted)).toBe('top');
+  });
+});
+
+describe('screenEdgesFor —— 分辨"真屏幕边"与"屏内交界"', () => {
+  const displays = [
+    { x: 0, y: 0, width: 1920, height: 1080 },
+    { x: 1920, y: 0, width: 1920, height: 1080 },
+  ];
+  const d1 = { x: 0, y: 0, width: 1920, height: 1040 };
+  const d2 = { x: 1920, y: 0, width: 1920, height: 1040 };
+
+  it('主屏：右边是屏内交界（外面还有副屏），左/上是真屏幕边', () => {
+    expect(screenEdgesFor(d1, displays, { x: 900, y: 500 })).toEqual({
+      top: true,
+      left: true,
+      right: false,
+    });
+  });
+
+  it('副屏：左边是屏内交界，右/上是真屏幕边', () => {
+    expect(screenEdgesFor(d2, displays, { x: 2800, y: 500 })).toEqual({
+      top: true,
+      left: false,
+      right: true,
+    });
+  });
+
+  it('单屏时三条边都是屏幕边', () => {
+    expect(screenEdgesFor(d1, [displays[0]], { x: 900, y: 500 })).toEqual({
+      top: true,
+      left: true,
+      right: true,
+    });
   });
 });
 

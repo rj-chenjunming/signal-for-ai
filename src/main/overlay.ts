@@ -24,7 +24,7 @@ import * as path from 'node:path';
 
 import { LAMP_DOCK_DEBOUNCE_MS, LAMP_POSITION_DEBOUNCE_MS } from '../shared/constants';
 import { countVisibleTasks } from '../shared/visibility';
-import { resolveCanvasSize, resolveDock } from './overlay-layout';
+import { resolveCanvasSize, resolveDock, screenEdgesFor } from './overlay-layout';
 import type { LampDock, LampSettings, Snapshot } from '../shared/types';
 import { IPC_PUSH } from '../shared/ipc-contract';
 import { pushLayout } from './ipc';
@@ -288,6 +288,33 @@ export class OverlayWindow {
   }
 
   /**
+   * 由窗口当前 bounds 算出停靠方向。
+   *
+   * 两件事都必须做对，否则判定会错（两个错误都真实发生过，见 D90 与本轮修复）：
+   *  1. 取显示器用**窗口中心点** —— 不用 `getDisplayMatching` 的"最大交集"，
+   *     灯压在两屏交界时它可能选中隔壁那块屏；
+   *  2. 把"哪些边是真正的屏幕边"一并算出来交给纯函数 `resolveDock` ——
+   *     否则分不开"在屏幕边上继续外推"（正常贴边）与"跨屏摆放"（不该改形态）。
+   */
+  private dockFor(bounds: Electron.Rectangle): LampDock {
+    const workArea = this.workAreaFor(bounds);
+    if (workArea === null) {
+      return this.dock; // 拿不到显示器信息时保持现状
+    }
+    const center = {
+      x: bounds.x + Math.round(bounds.width / 2),
+      y: bounds.y + Math.round(bounds.height / 2),
+    };
+    let displays: Electron.Rectangle[] = [];
+    try {
+      displays = screen.getAllDisplays().map((d) => d.bounds);
+    } catch {
+      // 拿不到显示器列表时按"三条边都是屏幕边"处理，也就是单屏语义
+    }
+    return resolveDock(bounds, workArea, screenEdgesFor(workArea, displays, center));
+  }
+
+  /**
    * 重新判定停靠方向；变了就换形态、按"贴边那条边不动"改尺寸、通知渲染层。
    *
    * 判定规则见 `overlay-layout.ts` 的 `resolveDock`（纯函数、已单测）。
@@ -298,18 +325,13 @@ export class OverlayWindow {
       return;
     }
     let bounds: Electron.Rectangle;
-    let workArea: Electron.Rectangle | null;
     try {
       bounds = this.win.getBounds();
-      workArea = this.workAreaFor(bounds);
     } catch {
       return;
     }
-    if (workArea === null) {
-      return; // 拿不到显示器信息时保持现状
-    }
 
-    const next = resolveDock(bounds, workArea);
+    const next = this.dockFor(bounds);
     if (next === this.dock) {
       return;
     }
