@@ -22,6 +22,7 @@ import {
 } from '../shared/ipc-contract';
 import type {
   FocusResult,
+  LampLayout,
   NotifyActionId,
   PlaySoundRequest,
   ProbeTerminalResponse,
@@ -58,6 +59,8 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 const api: RendererApi = {
   getSnapshot: (): Promise<Snapshot> => ipcRenderer.invoke(IPC.GET_SNAPSHOT),
 
+  getLayout: (): Promise<LampLayout> => ipcRenderer.invoke(IPC.GET_LAYOUT),
+
   sendTaskAction: (req: TaskActionRequest): Promise<TaskActionResponse> =>
     ipcRenderer.invoke(IPC.TASK_ACTION, req),
 
@@ -85,6 +88,9 @@ const api: RendererApi = {
 
   onToast: (cb: (req: { message: string }) => void): (() => void) =>
     subscribe<{ message: string }>(IPC.APP_TOAST, cb),
+
+  onLayout: (cb: (layout: LampLayout) => void): (() => void) =>
+    subscribe<LampLayout>(IPC_PUSH.LAYOUT, cb),
 
   role: detectRole(),
 };

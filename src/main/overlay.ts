@@ -22,11 +22,12 @@
 import { BrowserWindow, screen } from 'electron';
 import * as path from 'node:path';
 
-import { LAMP_POSITION_DEBOUNCE_MS } from '../shared/constants';
+import { LAMP_DOCK_DEBOUNCE_MS, LAMP_POSITION_DEBOUNCE_MS } from '../shared/constants';
 import { countVisibleTasks } from '../shared/visibility';
-import { resolveCanvasSize } from './overlay-layout';
-import type { LampSettings, Snapshot } from '../shared/types';
+import { resolveCanvasSize, resolveDock } from './overlay-layout';
+import type { LampDock, LampSettings, Snapshot } from '../shared/types';
 import { IPC_PUSH } from '../shared/ipc-contract';
+import { pushLayout } from './ipc';
 import type { Logger } from './logger';
 
 export interface OverlayOptions {
@@ -49,6 +50,15 @@ export class OverlayWindow {
   private win: BrowserWindow | null = null;
   private settings: LampSettings;
   private moveTimer: NodeJS.Timeout | null = null;
+  /** 停靠形态判定的去抖计时器（与位置写回分开，见 scheduleDockEval）。 */
+  private dockTimer: NodeJS.Timeout | null = null;
+  /**
+   * 当前贴在哪条屏幕边缘。
+   *
+   * 非 `none` 时切成"点阵形态"：只留圆点、去掉文字标签
+   * （用户要求：「拖到侧边或顶部的时候变成一排信号灯，没有那些后面的信号描述」）。
+   */
+  private dock: LampDock = 'none';
   /** 最近一次收到的快照：用于按"可显示行数"算画布尺寸（见 stripTaskCount）。 */
   private lastSnapshot: Snapshot | null = null;
 
@@ -111,11 +121,15 @@ export class OverlayWindow {
     // ready-to-show 后再显示，避免白屏闪烁
     this.win.once('ready-to-show', () => {
       this.win?.showInactive();
+      // 让渲染层一开始就用对形态（它挂载时还会主动 getLayout 兜一次，防竞态）
+      this.pushCurrentLayout();
     });
 
     // 位置记忆（debounce 500ms，架构 §1.3）
     this.win.on('moved', () => {
       this.schedulePersistPosition();
+      // 停靠形态用更短的去抖：形态要跟手，落盘可以慢
+      this.scheduleDockEval();
     });
 
     this.win.on('closed', () => {
@@ -125,6 +139,10 @@ export class OverlayWindow {
     this.options.logger.info(
       `悬浮灯窗口已创建（${width}x${height} @${position.x},${position.y}，${this.stripTaskCount() >= 2 ? '灯带' : '单灯'}模式，任务数=${this.stripTaskCount()}）`,
     );
+
+    // ★ 启动即判定一次：上次拖到边缘的位置会被记进配置，下次启动时
+    // 并**不会**有 `moved` 事件，不在这里判一次形态就不定型。
+    this.evaluateDock();
   }
 
   /**
@@ -163,7 +181,7 @@ export class OverlayWindow {
     } catch {
       // 无 display 信息（极早期调用/无头环境）时用保守上限
     }
-    return resolveCanvasSize(this.settings.size, this.stripTaskCount(), maxHeight);
+    return resolveCanvasSize(this.settings.size, this.stripTaskCount(), maxHeight, this.dock);
   }
 
   /**
@@ -243,6 +261,142 @@ export class OverlayWindow {
     }
   }
 
+  /* ============================================================================
+   * 边缘停靠（拖到侧边/顶部 -> 点阵形态）
+   * ==========================================================================*/
+
+  /** 当前停靠方向（index.ts 的 GET_LAYOUT handler 用它回渲染层的主动拉取）。 */
+  get currentDock(): LampDock {
+    return this.dock;
+  }
+
+  /**
+   * 停靠形态判定的去抖入口。
+   *
+   * 【为什么与位置写回分开计时】`moved` 在拖动过程中高频触发，
+   * 每帧改窗口尺寸会让拖动发抖；而位置写回要 500ms 去抖以免频繁写盘。
+   * 两者目标不同 —— 形态 160ms 跟手，落盘 500ms 稳。
+   */
+  private scheduleDockEval(): void {
+    if (this.dockTimer) {
+      clearTimeout(this.dockTimer);
+    }
+    this.dockTimer = setTimeout(() => {
+      this.dockTimer = null;
+      this.evaluateDock();
+    }, LAMP_DOCK_DEBOUNCE_MS);
+  }
+
+  /**
+   * 重新判定停靠方向；变了就换形态、按"贴边那条边不动"改尺寸、通知渲染层。
+   *
+   * 判定规则见 `overlay-layout.ts` 的 `resolveDock`（纯函数、已单测）。
+   * 只认上 / 左 / 右三条边 —— 用户要的是"拖到侧边或顶部"。
+   */
+  private evaluateDock(): void {
+    if (!this.win || this.win.isDestroyed()) {
+      return;
+    }
+    let bounds: Electron.Rectangle;
+    let workArea: Electron.Rectangle | null;
+    try {
+      bounds = this.win.getBounds();
+      workArea = this.workAreaFor(bounds);
+    } catch {
+      return;
+    }
+    if (workArea === null) {
+      return; // 拿不到显示器信息时保持现状
+    }
+
+    const next = resolveDock(bounds, workArea);
+    if (next === this.dock) {
+      return;
+    }
+    const previous = this.dock;
+    this.dock = next;
+    this.options.logger.info(`悬浮灯停靠形态变化：${previous} -> ${next}`);
+
+    const { width, height } = this.resolveCanvasSize();
+    this.resizeAnchored(width, height, '悬浮灯尺寸随停靠调整');
+    this.pushCurrentLayout();
+  }
+
+  /** 把当前停靠方向推给渲染层。 */
+  private pushCurrentLayout(): void {
+    pushLayout(this.getBrowserWindow(), { dock: this.dock });
+  }
+
+  /**
+   * 取窗口所在显示器的工作区。
+   *
+   * ★ 用**窗口中心点**判定，而不是 `getDisplayMatching`（矩形最大交集）。
+   * 原因：本项目实测踩到过 —— 灯正好压在两块屏交界处时（用户的灯一度在
+   * x=1768 附近，而主屏宽 1920），"最大交集"可能选中隔壁那块屏，
+   * 于是右边缘距离算成了负数，灯被判成"贴右边缘"。
+   * 中心点只属于一块屏，没有歧义。
+   */
+  private workAreaFor(bounds: Electron.Rectangle): Electron.Rectangle | null {
+    try {
+      const center = {
+        x: bounds.x + Math.round(bounds.width / 2),
+        y: bounds.y + Math.round(bounds.height / 2),
+      };
+      return screen.getDisplayNearestPoint(center).workArea;
+    } catch {
+      return null; // 无显示器信息（无头/极早期）
+    }
+  }
+
+  /**
+   * 改窗口尺寸，但让**贴着的那条边保持不动**。
+   *
+   * 例：右边缘停靠时缩小窗口要往左收（右边缘不动），否则灯会离屏幕边越来越远，
+   * 看起来"没吸附住"。停靠时还会把窗口夹回工作区，避免加宽后跑出屏幕。
+   * 未停靠时行为与原来完全一致（只改尺寸、不动位置）。
+   */
+  private resizeAnchored(targetWidth: number, targetHeight: number, reason: string): void {
+    if (!this.win || this.win.isDestroyed()) {
+      return;
+    }
+    let bounds: Electron.Rectangle;
+    let workArea: Electron.Rectangle | null;
+    try {
+      bounds = this.win.getBounds();
+      workArea = this.workAreaFor(bounds);
+    } catch {
+      return;
+    }
+    if (workArea === null) {
+      return;
+    }
+
+    let nextX = bounds.x;
+    let nextY = bounds.y;
+    if (this.dock === 'right') {
+      nextX = bounds.x + bounds.width - targetWidth;
+    }
+    if (this.dock !== 'none') {
+      nextX = Math.max(workArea.x, Math.min(nextX, workArea.x + workArea.width - targetWidth));
+      nextY = Math.max(workArea.y, Math.min(nextY, workArea.y + workArea.height - targetHeight));
+    }
+
+    const x = Math.round(nextX);
+    const y = Math.round(nextY);
+    if (bounds.width === targetWidth && bounds.height === targetHeight && bounds.x === x && bounds.y === y) {
+      return;
+    }
+
+    try {
+      this.win.setBounds({ x, y, width: targetWidth, height: targetHeight });
+      this.options.logger.info(
+        `${reason}：${bounds.width}x${bounds.height} -> ${targetWidth}x${targetHeight}`,
+      );
+    } catch (err) {
+      this.options.logger.warn(`${reason}失败：${(err as Error).message}`);
+    }
+  }
+
   /** 应用设置变更（如 clickThrough / alwaysOnTop 被用户在配置里改了）。 */
   applySettings(next: LampSettings): void {
     // ⚠️ clickThrough **不参与**重建判定：它由下面的 setIgnoreMouseEvents 实时生效。
@@ -283,15 +437,9 @@ export class OverlayWindow {
     if (!force && currentWidth === width && currentHeight === height) {
       return;
     }
-    try {
-      const [x, y] = this.win.getPosition();
-      this.win.setBounds({ x, y, width, height });
-      this.options.logger.info(
-        `悬浮灯尺寸随任务数调整：${currentWidth}x${currentHeight} -> ${width}x${height}`,
-      );
-    } catch (err) {
-      this.options.logger.warn(`调整悬浮灯尺寸失败：${(err as Error).message}`);
-    }
+    // 尺寸变化统一走 resizeAnchored：停靠时保持贴边那条边不动，
+    // 未停靠时它就是原来的行为（只改尺寸、位置不动）。
+    this.resizeAnchored(width, height, '悬浮灯尺寸随任务数调整');
   }
 
   setVisible(visible: boolean): void {
@@ -321,6 +469,10 @@ export class OverlayWindow {
     if (this.moveTimer) {
       clearTimeout(this.moveTimer);
       this.moveTimer = null;
+    }
+    if (this.dockTimer) {
+      clearTimeout(this.dockTimer);
+      this.dockTimer = null;
     }
     if (this.win && !this.win.isDestroyed()) {
       this.win.destroy();

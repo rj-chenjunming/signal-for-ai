@@ -193,6 +193,13 @@ for (const c of shadow.clips.filter((x) => x.overflow !== undefined)) {
   );
   // overflow 容器会裁掉超出裁剪边的阴影 —— 水平方向最容易漏
   for (const d of c.dots ?? []) {
+    // ★ `overflow: visible` 的容器**根本不裁剪**子元素的阴影 ——
+    // 此时"阴影超出内边距"不是问题（留白只是审美），报出来会把
+    // 点阵形态这种"贴边留白很小"的正常布局误判成"被裁"。
+    // 这个误报真实出现过：点阵形态 `.strip-rows` 的 padding 归零后刷出 4 个假 ❌。
+    if (c.overflow === 'visible') {
+      continue;
+    }
     if (d.overL > 0 || d.overR > 0) {
       console.log(
         `        ❌ ${d.cls}: 阴影超出裁剪边 ${d.overL > 0 ? `左 ${d.overL}px` : ''}` +

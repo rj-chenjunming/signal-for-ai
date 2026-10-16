@@ -18,6 +18,8 @@
 
 import type {
   FocusResult,
+  LampDock,
+  LampLayout,
   NotifyActionId,
   ProbeTerminalResponse,
   Snapshot,
@@ -65,4 +67,6 @@ declare global {
   type AiFocusResult = FocusResult;
   type AiNotifyActionId = NotifyActionId;
   type AiProbeTerminalResponse = ProbeTerminalResponse;
+  type AiLampDock = LampDock;
+  type AiLampLayout = LampLayout;
 }

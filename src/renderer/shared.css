@@ -304,6 +304,76 @@ body.strip-mode .lamp-drag {
   height: 100%;
 }
 
+/* ============================================================================
+ * ★ 边缘停靠：点阵形态（拖到侧边/顶部时只留灯，去掉文字）
+ * ============================================================================
+ * 用户要求：「拖到侧边或顶部的时候能够变成一排信号灯，没有那些后面的信号描述」。
+ *
+ * 形态由主进程判定（窗口离哪条屏幕边 ≤ DOCK_THRESHOLD），经 IPC_PUSH.LAYOUT
+ * 下发；overlay.js 把 dock-* 类挂到 body 上，这里只负责画。
+ *
+ *  - dock-left / dock-right -> 竖排点阵（保持竖排，只把文字藏掉、留白收紧）
+ *  - dock-top               -> 横排点阵（整条转 90°，总灯在左、各灯向右排）
+ *
+ * ⚠️ 尺寸常量与 overlay-layout.ts 的 COMPACT_* 一一对应。改这里必须同步改那边，
+ *    否则圆点会被窗口边缘裁掉（这个坑在常规灯带上真实发生过）。
+ * ==========================================================================*/
+
+/* 点阵形态：三处"装饰性"留白全部去掉，几何变得可精确预测 */
+body.dock-left .strip-rows,
+body.dock-right .strip-rows,
+body.dock-top .strip-rows {
+  padding: 0;
+  max-height: none;
+  overflow: visible;
+}
+
+body.dock-left .lamp-strip,
+body.dock-right .lamp-strip,
+body.dock-top .lamp-strip {
+  gap: 6px;
+  padding: 4px;
+}
+
+body.dock-left .strip-master,
+body.dock-right .strip-master,
+body.dock-top .strip-master {
+  width: auto;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+/* 点阵形态只要灯：标签与数量徽标都藏掉 */
+body.dock-left .strip-port,
+body.dock-right .strip-port,
+body.dock-top .strip-port,
+body.dock-left .strip-master-label,
+body.dock-right .strip-master-label,
+body.dock-top .strip-master-label,
+body.dock-left .strip-master .lamp-badge,
+body.dock-right .strip-master .lamp-badge,
+body.dock-top .strip-master .lamp-badge {
+  display: none;
+}
+
+/* 顶部停靠：整条转成横向排列 */
+body.dock-top .lamp-strip {
+  flex-direction: row;
+  align-items: center;
+}
+
+body.dock-top .strip-rows {
+  flex-direction: row;
+  align-items: center;
+}
+
+/* 侧边停靠：总灯居中于点阵列 */
+body.dock-left .strip-master,
+body.dock-right .strip-master {
+  justify-content: center;
+}
+
 /* 数量徽标（PRD P0-5：running=0 时不显示） */
 .lamp-badge {
   position: absolute;

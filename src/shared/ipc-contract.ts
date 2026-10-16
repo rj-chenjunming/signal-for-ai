@@ -10,6 +10,7 @@
 import type {
   ConfigReloadOutcome,
   FocusResult,
+  LampLayout,
   NotifyActionId,
   PlaySoundRequest,
   ProbeTerminalResponse,
@@ -38,6 +39,14 @@ export const IPC = Object.freeze({
   CONFIG_RELOADED: 'app:configReloaded',
   /** 托盘气泡/窗口级事件（渲染层可据此显示轻提示）。 */
   APP_TOAST: 'app:toast',
+  /**
+   * 拉取当前浮窗布局（停靠方向）。
+   *
+   * 【为什么既要订阅又要主动拉】停靠形态是**低频**变化，若只在主进程推送，
+   * 渲染层"挂载中（await getSnapshot 未返回）"时那一次推送就会丢，
+   * 灯会一直停在错的形态上。启动时先拉一次，之后靠订阅跟进。
+   */
+  GET_LAYOUT: 'app:getLayout',
 } as const);
 
 /** 主进程向渲染层推送的通道（M→R）。 */
@@ -46,6 +55,8 @@ export const IPC_PUSH = Object.freeze({
   SNAPSHOT: 'app:snapshot',
   /** 音效播放指令，由主进程决定响哪一声。 */
   PLAY_SOUND: 'notify:play',
+  /** 浮窗布局（停靠方向）变更 —— 与状态无关，故独立于 SNAPSHOT。 */
+  LAYOUT: 'app:layout',
 } as const);
 
 /** 重新导出，便于只 import ipc-contract 的调用方。 */
@@ -77,17 +88,21 @@ export interface InvokeMap {
   [IPC.REPROBE_TERMINAL]: { request: void; response: ProbeTerminalResponse };
   [IPC.CONFIG_RELOADED]: { request: ConfigReloadOutcome; response: void };
   [IPC.APP_TOAST]: { request: { message: string }; response: void };
+  [IPC.GET_LAYOUT]: { request: void; response: LampLayout };
 }
 
 /** 每个 push 通道的载荷类型。 */
 export interface PushMap {
   [IPC_PUSH.SNAPSHOT]: Snapshot;
   [IPC_PUSH.PLAY_SOUND]: PlaySoundRequest;
+  [IPC_PUSH.LAYOUT]: LampLayout;
 }
 
 /** 暴露给渲染层的全局 API 形状（preload contextBridge 白名单的契约）。 */
 export interface RendererApi {
   getSnapshot(): Promise<Snapshot>;
+  /** 拉取当前浮窗布局（停靠方向）；与 onLayout 配套使用。 */
+  getLayout(): Promise<LampLayout>;
   sendTaskAction(req: TaskActionRequest): Promise<TaskActionResponse>;
   togglePanel(): Promise<{ expanded: boolean }>;
   notifyLampDragged(pos: { x: number; y: number }): Promise<{ ok: boolean }>;
@@ -101,6 +116,8 @@ export interface RendererApi {
   onSnapshot(cb: (snapshot: Snapshot) => void): () => void;
   onPlaySound(cb: (req: PlaySoundRequest) => void): () => void;
   onToast(cb: (req: { message: string }) => void): () => void;
+  /** 浮窗布局（停靠方向）订阅。 */
+  onLayout(cb: (layout: LampLayout) => void): () => void;
   /** 当前窗口角色（overlay / panel），由 preload 读取 HTML 上的 data 属性注入。 */
   readonly role: 'overlay' | 'panel';
 }

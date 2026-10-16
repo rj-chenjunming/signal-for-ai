@@ -308,6 +308,8 @@ async function startApplication(): Promise<void> {
   registerIpcHandlers(
     {
       getSnapshot: () => store.getSnapshot(),
+      // 停靠形态取决于窗口位置，只有 OverlayWindow 知道；渲染层挂载时会主动拉一次
+      getLayout: () => ({ dock: overlay.currentDock }),
       handleTaskAction: (req) => handleTaskAction(req),
       handleNotifyAction: (taskId, action) => handleNotifyAction(taskId, action),
       togglePanel: () => panel.toggle(),

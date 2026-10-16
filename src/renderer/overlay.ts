@@ -344,6 +344,31 @@ lampCore.addEventListener('keydown', (event: KeyboardEvent) => {
 });
 
 /* ============================================================================
+ * 边缘停靠（点阵形态）
+ * ==========================================================================*/
+
+/** 全部停靠类名；切换形态前先清干净，避免多个类同时挂着。 */
+const ALL_DOCK_CLASSES = ['dock-none', 'dock-top', 'dock-left', 'dock-right'];
+
+/**
+ * 应用主进程下发的停靠方向。
+ *
+ * 渲染层在这里**只做一件事**：把 `dock-*` 类挂到 body 上；
+ * 具体长什么样（横排还是竖排、藏哪些文字、留白多少）全部由 CSS 决定
+ * —— 见 shared.css 的「边缘停靠」段。
+ *
+ * 这与 `stripMode` 是同一套分工："什么时候算贴边"属于业务判断，留在主进程；
+ * 渲染层只负责照着画（本文件是 classic script，也**不能**自己判断屏幕位置）。
+ */
+function applyLayout(layout: AiLampLayout): void {
+  const dock: AiLampDock = layout?.dock ?? 'none';
+  for (const cls of ALL_DOCK_CLASSES) {
+    document.body.classList.remove(cls);
+  }
+  document.body.classList.add(`dock-${dock}`);
+}
+
+/* ============================================================================
  * 启动
  * ==========================================================================*/
 
@@ -364,6 +389,9 @@ async function start(): Promise<void> {
 
   // 订阅后续推送（M→R 唯一数据下发通道）
   api.onSnapshot(render);
+
+  // 停靠形态（拖到侧边/顶部 -> 点阵）：与状态无关，走独立通道
+  api.onLayout(applyLayout);
 
   // 主进程要求响某声时（notify:play）
   api.onPlaySound((req) => {

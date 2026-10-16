@@ -18,12 +18,21 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
+  compactCanvasSize,
   resolveCanvasSize,
+  resolveDock,
   stripCanvasHeight,
   stripCanvasWidth,
   stripContentHeight,
+  COMPACT_DOT,
+  COMPACT_GAP,
+  COMPACT_MASTER,
+  COMPACT_PAD,
+  COMPACT_SHADOW_PAD,
+  DOCK_THRESHOLD,
   SINGLE_LAMP_EXTRA,
   STRIP_CONTENT_WIDTH,
+  STRIP_GAP,
   STRIP_MASTER_HEIGHT,
   STRIP_PAD_X,
   STRIP_PAD_Y,
@@ -65,6 +74,17 @@ function cssPx(selector: string, prop: string): number | undefined {
   if (block === undefined) return undefined;
   const m = new RegExp(`(?:^|[\\s;])${prop}\\s*:\\s*([0-9.]+)px`, 'mu').exec(block);
   return m ? Number(m[1]) : undefined;
+}
+
+/**
+ * 取 `body.dock-*` 那段**多选择器**规则块。
+ *
+ * `cssBlock` 要求选择器紧跟 `{`，而停靠规则的选择器跨了三行，所以这里单独解析。
+ */
+function dockRuleBlock(selectorSuffix: string): string {
+  const esc = selectorSuffix.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const re = new RegExp(`^body\\.dock-left ${esc},[\\s\\S]*?\\{([^}]*)\\}`, 'mu');
+  return re.exec(CSS)?.[1] ?? '';
 }
 
 describe('交叉校验：TS 常量必须与 shared.css 一致', () => {
@@ -238,5 +258,152 @@ describe('resolveCanvasSize —— 单灯与灯带两种形态', () => {
     const { width } = resolveCanvasSize(28, 3, 900);
     expect(width).toBeLessThan(180);
     expect(width).toBeGreaterThanOrEqual(100);
+  });
+});
+
+/* ============================================================================
+ * 边缘停靠（拖到侧边/顶部 -> 点阵形态）
+ * ==========================================================================*/
+
+describe('resolveDock —— 贴边判定（纯函数）', () => {
+  const workArea = { x: 0, y: 0, width: 1920, height: 1080 };
+  const size = { width: 164, height: 117 };
+
+  it('贴左边 -> left（含阈值内的近似贴边）', () => {
+    expect(resolveDock({ x: 0, y: 400, ...size }, workArea)).toBe('left');
+    expect(resolveDock({ x: 10, y: 400, ...size }, workArea)).toBe('left');
+  });
+
+  it('贴右边 -> right', () => {
+    expect(resolveDock({ x: 1920 - 164, y: 400, ...size }, workArea)).toBe('right');
+    expect(resolveDock({ x: 1920 - 164 - 12, y: 400, ...size }, workArea)).toBe('right');
+  });
+
+  it('贴顶部 -> top', () => {
+    expect(resolveDock({ x: 800, y: 0, ...size }, workArea)).toBe('top');
+    expect(resolveDock({ x: 800, y: 18, ...size }, workArea)).toBe('top');
+  });
+
+  it('离开边缘 -> none', () => {
+    expect(resolveDock({ x: 800, y: 500, ...size }, workArea)).toBe('none');
+    expect(resolveDock({ x: DOCK_THRESHOLD + 1, y: 500, ...size }, workArea)).toBe('none');
+  });
+
+  it('阈值边界：等于阈值算贴边，超出 1px 就不算', () => {
+    expect(resolveDock({ x: DOCK_THRESHOLD, y: 500, ...size }, workArea)).toBe('left');
+    expect(resolveDock({ x: DOCK_THRESHOLD + 1, y: 500, ...size }, workArea)).toBe('none');
+  });
+
+  it('★ 左上角并列时顶部优先（横排更自然）', () => {
+    expect(resolveDock({ x: 0, y: 0, ...size }, workArea)).toBe('top');
+  });
+
+  it('贴底部不改变形态（用户只要侧边与顶部）', () => {
+    expect(resolveDock({ x: 800, y: 1080 - 117, ...size }, workArea)).toBe('none');
+  });
+
+  it('★ 窗口"越过"这条边（跨屏摆放）不算贴边', () => {
+    // 实测 bug：用户的灯 x=1768、宽 164 -> 右边缘 1932，越过主屏右边界(1920)
+    // 12px。若只判 `<= 阈值`，距离 -12 会被当成"贴右边缘"，灯莫名缩成点阵。
+    const straddling = { x: 1768, y: 169, width: 164, height: 135 };
+    expect(resolveDock(straddling, workArea)).toBe('none');
+    // 负距离的所有边都不能算贴边
+    expect(resolveDock({ x: -30, y: 500, ...size }, workArea)).toBe('none');
+    expect(resolveDock({ x: 800, y: -30, ...size }, workArea)).toBe('none');
+  });
+
+  it('工作区有偏移（任务栏/多屏负坐标）时按相对距离判定', () => {
+    const shifted = { x: -1920, y: 40, width: 1920, height: 1040 };
+    expect(resolveDock({ x: -1920, y: 200, ...size }, shifted)).toBe('left');
+    expect(resolveDock({ x: -164, y: 200, ...size }, shifted)).toBe('right');
+    expect(resolveDock({ x: -1000, y: 40, ...size }, shifted)).toBe('top');
+  });
+});
+
+describe('compactCanvasSize —— 点阵形态尺寸', () => {
+  it('顶部停靠是横排（宽 > 高）；左右停靠是竖排（高 > 宽）且两则同形', () => {
+    const top = compactCanvasSize(3, 'top');
+    expect(top.width).toBeGreaterThan(top.height);
+
+    const left = compactCanvasSize(3, 'left');
+    expect(left.height).toBeGreaterThan(left.width);
+    expect(compactCanvasSize(3, 'right')).toEqual(left);
+  });
+
+  it('主轴随行数增长，交叉轴不变', () => {
+    const two = compactCanvasSize(2, 'top');
+    const five = compactCanvasSize(5, 'top');
+    expect(five.width).toBeGreaterThan(two.width);
+    expect(five.height).toBe(two.height);
+
+    const twoV = compactCanvasSize(2, 'left');
+    const fiveV = compactCanvasSize(5, 'left');
+    expect(fiveV.height).toBeGreaterThan(twoV.height);
+    expect(fiveV.width).toBe(twoV.width);
+  });
+
+  it('★ 交叉轴容得下最大的圆点 + 内边距 + 投影留白', () => {
+    for (const dock of ['top', 'left', 'right'] as const) {
+      const size = compactCanvasSize(3, dock);
+      const cross = dock === 'top' ? size.height : size.width;
+      expect(cross).toBeGreaterThanOrEqual(COMPACT_MASTER + COMPACT_PAD * 2 + COMPACT_SHADOW_PAD * 2);
+    }
+  });
+
+  it('★ 主轴容得下 总灯 + 间距 + n 个圆点与它们之间的间距', () => {
+    const n = 4;
+    const needed =
+      COMPACT_MASTER +
+      STRIP_GAP +
+      (n * COMPACT_DOT + (n - 1) * COMPACT_GAP) +
+      COMPACT_PAD * 2 +
+      COMPACT_SHADOW_PAD * 2;
+    for (const dock of ['top', 'left', 'right'] as const) {
+      const size = compactCanvasSize(n, dock);
+      const main = dock === 'top' ? size.width : size.height;
+      expect(main).toBeGreaterThanOrEqual(needed);
+    }
+  });
+
+  it('点阵明比常规灯带窄得多（这正是它的意义）', () => {
+    const strip = resolveCanvasSize(28, 3, 900);
+    const compact = resolveCanvasSize(28, 3, 900, 'left');
+    expect(compact.width).toBeLessThan(strip.width / 2);
+  });
+
+  it('resolveCanvasSize 传 dock 时走点阵；行数 < 2 仍是单灯（点阵无意义）', () => {
+    expect(resolveCanvasSize(28, 3, 900, 'top')).toEqual(compactCanvasSize(3, 'top'));
+    expect(resolveCanvasSize(28, 1, 900, 'top')).toEqual({ width: 52, height: 52 });
+  });
+
+  it('★ 交叉校验：COMPACT_PAD 与 dock 形态的 .lamp-strip padding 一致', () => {
+    const block = dockRuleBlock('.lamp-strip');
+    expect(block).not.toBe('');
+    const m = /padding:\s*([0-9.]+)px/u.exec(block);
+    expect(m).not.toBeNull();
+    expect(Number(m?.[1])).toBe(COMPACT_PAD);
+  });
+
+  it('★ 交叉校验：dock 形态下 .strip-rows 的 padding 必须归零（几何才能精确预测）', () => {
+    const block = dockRuleBlock('.strip-rows');
+    expect(block).not.toBe('');
+    expect(/padding:\s*0/u.test(block)).toBe(true);
+    // 点阵不滚动：留着 overflow 裁剪边只会白白切掉投影
+    expect(/overflow:\s*visible/u.test(block)).toBe(true);
+  });
+
+  it('★ 交叉校验：COMPACT_DOT / COMPACT_MASTER 与 CSS 圆点尺寸一致', () => {
+    expect(cssPx('.strip-dot', 'width')).toBe(COMPACT_DOT);
+    expect(cssPx('.strip-master-dot', 'width')).toBe(COMPACT_MASTER);
+  });
+
+  it('★ 点阵形态必须把文字标签与徽标藏起来（"没有那些后面的信号描述"）', () => {
+    // 这条锁的是需求本身：点阵形态只留灯
+    for (const cls of ['.strip-port', '.strip-master-label']) {
+      const re = new RegExp(`body\\.dock-left ${cls.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}`, 'u');
+      expect(re.test(CSS)).toBe(true);
+    }
+    // 横排时整条要转向
+    expect(/body\.dock-top \.lamp-strip\s*\{[^}]*flex-direction:\s*row/u.test(CSS)).toBe(true);
   });
 });

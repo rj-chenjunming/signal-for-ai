@@ -285,6 +285,15 @@ export const CONFIG_WATCH_DEBOUNCE_MS = 300;
 /** 灯位置写回配置的 debounce（架构 §1.3）。 */
 export const LAMP_POSITION_DEBOUNCE_MS = 500;
 
+/**
+ * 停靠形态判定的 debounce（比位置写回短得多）。
+ *
+ * `moved` 在拖动过程中高频触发；每帧改窗口尺寸会让拖动发抖。
+ * 等手停下来 ~160ms 再定型，既不抖也不觉得迟钝。
+ * 与位置写回分开计时：形态要"跟手"，落盘可以慢。
+ */
+export const LAMP_DOCK_DEBOUNCE_MS = 160;
+
 /** 暂停监控时长（PRD §7.2 托盘菜单：暂停 30min）。 */
 export const PAUSE_DURATION_MS = 30 * 60 * 1000;
 

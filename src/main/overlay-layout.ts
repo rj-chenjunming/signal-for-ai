@@ -26,6 +26,8 @@
  * @module overlay-layout
  */
 
+import type { LampDock } from '../shared/types';
+
 /** 单灯模式的正方形画布 = 灯直径 + 24（给徽标与 hover 提示留余量）。 */
 export const SINGLE_LAMP_EXTRA = 24;
 
@@ -136,11 +138,13 @@ export function stripCanvasHeight(rows: number): number {
  * @param lampSize  单灯直径（来自 lamp.size 设置）
  * @param taskCount 启用的任务数；< 2 时退回单灯形态
  * @param maxHeight 高度上限（超出由 .strip-rows 自己滚动），默认 70vh
+ * @param dock      停靠方向；非 none 时改用点阵形态（见下方「边缘停靠」）
  */
 export function resolveCanvasSize(
   lampSize: number,
   taskCount: number,
   maxHeight: number,
+  dock: LampDock = 'none',
 ): { width: number; height: number } {
   const base = Math.max(16, Math.round(lampSize));
 
@@ -149,8 +153,104 @@ export function resolveCanvasSize(
     return { width: square, height: square };
   }
 
+  if (dock !== 'none') {
+    return compactCanvasSize(taskCount, dock);
+  }
+
   return {
     width: stripCanvasWidth(),
     height: Math.min(stripCanvasHeight(taskCount), maxHeight),
   };
+}
+
+/* ============================================================================
+ * 边缘停靠 —— 拖到屏幕侧边/顶部时切成"点阵"形态（只要灯，不要文字）
+ * ==========================================================================*/
+
+/**
+ * 判定"贴边"的距离阈值（px）。
+ *
+ * 取 24 的理由：小于它时窗口边缘已经明显贴着屏幕边；
+ * 再大就容易被"只是放在旁边"的位置误触发。
+ */
+export const DOCK_THRESHOLD = 24;
+
+/** 点阵模式的圆点直径（与灯带里的小灯一致，视觉上不跳）。 */
+export const COMPACT_DOT = 14;
+/** 点阵模式里总灯（聚合态）的直径。 */
+export const COMPACT_MASTER = 16;
+/** 点阵模式的圆点间距。 */
+export const COMPACT_GAP = 5;
+/**
+ * 点阵模式的灯带内边距（四周）。
+ *
+ * 比常规灯带的 `6px 8px` 更紧：点阵形态追求"只剩一排灯"，
+ * 留白越少越不挡事（这些留白是透明的，但仍会吃掉鼠标事件）。
+ */
+export const COMPACT_PAD = 4;
+/** 点阵模式的额外留白：给 `box-shadow`（左右各外扩约 4px）留出不被裁的余量。 */
+export const COMPACT_SHADOW_PAD = 6;
+/** 点阵模式的安全余量：CSS 取整/字体度量可能多出 1–2px，宁可多留。 */
+export const COMPACT_SAFETY = 4;
+
+/**
+ * 点阵形态的画布尺寸。
+ *
+ * 主轴长度 = 总灯 + 间距 + n 个圆点 + (n-1) 个圆点间距；
+ * `top` 停靠时主轴是**水平**的（横排），左右停靠时是**垂直**的（竖排）。
+ *
+ * ⚠️ 这些常量必须与 `shared.css` 里 `body.dock-*` 那段保持一致。
+ * 与常规灯带同理：算小了就切圆点，算大了只是多一点看不见的透明边。
+ */
+export function compactCanvasSize(
+  rows: number,
+  dock: LampDock,
+): { width: number; height: number } {
+  const n = Math.max(0, rows);
+  const taskAxis = n > 0 ? n * COMPACT_DOT + (n - 1) * COMPACT_GAP : 0;
+  const mainAxis = taskAxis > 0 ? COMPACT_MASTER + STRIP_GAP + taskAxis : COMPACT_MASTER;
+
+  const horizontal = dock === 'top';
+  const contentW = horizontal ? mainAxis : Math.max(COMPACT_MASTER, COMPACT_DOT);
+  const contentH = horizontal ? COMPACT_MASTER : mainAxis;
+
+  return {
+    width: contentW + COMPACT_PAD * 2 + COMPACT_SHADOW_PAD * 2,
+    height: contentH + COMPACT_PAD * 2 + COMPACT_SHADOW_PAD * 2 + COMPACT_SAFETY,
+  };
+}
+
+/**
+ * 由窗口位置判定停靠方向（纯函数，可单测）。
+ *
+ * 只看**上 / 左 / 右**三条边（用户要的是"侧边或顶部"；贴底部不改变形态）。
+ * 距离取最近的一条；**并列时顶部优先** —— 左上角那种情况横排更自然也更好认。
+ *
+ * ⚠️ 距离必须落在 **0 ~ 阈值**：窗口"越过"这条边（距离为负）**不算**贴边。
+ * 这条判据来自实测踩的坑 —— 用户的灯在 x=1768、宽 164，右边缘 1932 正好压过
+ * 主屏右边界 1920、探进隔壁屏 12px，此时右边缘距离算出来是 **-12**；
+ * 若只判 `<= 阈值`，就会把"跨屏摆放"误判成"贴右边缘"，灯莫名缩成点阵。
+ */
+export function resolveDock(
+  bounds: { x: number; y: number; width: number; height: number },
+  workArea: { x: number; y: number; width: number; height: number },
+  threshold: number = DOCK_THRESHOLD,
+): LampDock {
+  const candidates: Array<{ dock: LampDock; distance: number }> = [
+    { dock: 'top', distance: bounds.y - workArea.y },
+    { dock: 'left', distance: bounds.x - workArea.x },
+    { dock: 'right', distance: workArea.x + workArea.width - (bounds.x + bounds.width) },
+  ];
+
+  let best: LampDock = 'none';
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const candidate of candidates) {
+    const { distance } = candidate;
+    // 严格小于 => 并列时先出现的（top）胜出
+    if (distance >= 0 && distance <= threshold && distance < bestDistance) {
+      bestDistance = distance;
+      best = candidate.dock;
+    }
+  }
+  return best;
 }

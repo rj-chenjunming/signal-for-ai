@@ -14,6 +14,7 @@ import { ipcMain, type BrowserWindow, type WebContents } from 'electron';
 import { IPC, IPC_PUSH, type ConfigReloadOutcome, type InvokeMap } from '../shared/ipc-contract';
 import type {
   FocusResult,
+  LampLayout,
   NotifyActionId,
   ProbeTerminalResponse,
   Snapshot,
@@ -39,6 +40,8 @@ export interface IpcHandlers {
   quit: () => void;
   /** 重新探测终端。 */
   reprobeTerminal: () => Promise<ProbeTerminalResponse>;
+  /** 当前浮窗布局（停靠方向）—— 渲染层挂载时主动拉一次。 */
+  getLayout?: () => LampLayout;
   /** 配置热重载完成（主进程 -> 渲染层可据此拉新快照）。 */
   onConfigReloaded?: (outcome: ConfigReloadOutcome) => void;
 }
@@ -82,6 +85,14 @@ export function registerIpcHandlers(handlers: IpcHandlers, logger: Logger): void
   safe(IPC.NOTIFY_ACTION, (req) => handlers.handleNotifyAction(req.taskId, req.action));
 
   safe(IPC.REPROBE_TERMINAL, () => handlers.reprobeTerminal());
+
+  // 布局：没注入 handler 时回一个"不停靠"的合法值，渲染层不必判空
+  safe(IPC.GET_LAYOUT, () => handlers.getLayout?.() ?? { dock: 'none' });
+}
+
+/** 向指定窗口推送布局（M→R）。 */
+export function pushLayout(win: BrowserWindow | null, layout: LampLayout): void {
+  sendTo(win, IPC_PUSH.LAYOUT, layout, 'app:layout');
 }
 
 /** 向指定窗口推送快照（M→R）。 */
@@ -157,6 +168,9 @@ function fallbackResponse(channel: string): unknown {
   }
   if (channel === IPC.REPROBE_TERMINAL) {
     return { wtAvailable: false } satisfies ProbeTerminalResponse;
+  }
+  if (channel === IPC.GET_LAYOUT) {
+    return { dock: 'none' } satisfies LampLayout;
   }
   return { ok: false };
 }
