@@ -629,13 +629,21 @@ async function onConfigReloaded(): Promise<void> {
       restarted: restart.restarted,
       warnings: [],
     };
+    // 应用**自己**写回的配置不弹提示 —— 那只是自身动作的回声（拖灯位置、
+    // 托盘开关都会写回配置），无条件提示会把浮窗刷屏。用户的原话：
+    // 「我鼠标放上去 一直会有配置已重载 或者（新增）之类的提示词 我觉得没有必要」。
+    // 提示只该为"用户改了配置文件、我读到了"出现。
+    const selfCaused = refs.configManager.isSelfWrite();
     logger.info(
-      `配置已热重载：新增 ${outcome.added.length} / 移除 ${outcome.removed.length} / 重启 ${outcome.restarted.length}`,
+      `配置已热重载${selfCaused ? '（应用自身写回，不提示）' : ''}：` +
+        `新增 ${outcome.added.length} / 移除 ${outcome.removed.length} / 重启 ${outcome.restarted.length}`,
     );
-    broadcastToast(
-      [refs.overlay.isAlive ? overlayWindowOrNull() : null, null],
-      `配置已重载（新增 ${outcome.added.length}，重启 ${outcome.restarted.length}）`,
-    );
+    if (!selfCaused) {
+      broadcastToast(
+        [refs.overlay.isAlive ? overlayWindowOrNull() : null, null],
+        `配置已重载（新增 ${outcome.added.length}，重启 ${outcome.restarted.length}）`,
+      );
+    }
   } catch (err) {
     logger.error('配置热重载处理异常（已隔离）', err);
     refs.tray.showBubble('配置重载失败', (err as Error).message);

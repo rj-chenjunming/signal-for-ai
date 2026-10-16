@@ -1002,6 +1002,13 @@ export class ConfigManager {
   private debounceTimer: NodeJS.Timeout | null = null;
   private cachedConfig: AppConfig | null = null;
   private cachedPath: string;
+  /**
+   * 应用最近一次写盘的内容。
+   *
+   * 用来分辨"这次文件变化是不是我自己写的"（见 `isSelfWrite`）——
+   * 否则写回位置之后必然收到一次自回声式的「配置已重载」提示。
+   */
+  private lastWrittenText: string | null = null;
 
   constructor(
     configPath: string,
@@ -1084,16 +1091,60 @@ export class ConfigManager {
   private persist(config: AppConfig): void {
     const target = this.cachedPath;
     try {
+      const text = stringifyYaml(config, { indent: 2 });
+
+      /*
+       * ★ 内容没变就**不写盘** —— 这道闸是必须的。
+       *
+       * 【为什么】文件监听器只看"文件被写过"，分辨不出是谁写的。于是
+       * 「写回 -> 监听器醒来 -> 判定配置变了 -> 弹「配置已重载」」会自己咬自己：
+       * 实测用户每拖一次灯（改尺寸同样会触发 moved）就收到一条毫无意义的提示，
+       * 日志里 25 分钟出现 34 次写回 + 37 次重载。
+       *
+       * 值没变时连备份都不做 —— 没变化就没有可备份的东西。
+       */
+      let current: string | null = null;
+      try {
+        current = fs.readFileSync(target, 'utf8');
+      } catch {
+        current = null; // 首次写盘（文件还不存在）
+      }
+      if (current === text) {
+        return;
+      }
+
       fs.mkdirSync(path.dirname(target), { recursive: true });
-      if (fs.existsSync(target)) {
+      if (current !== null) {
         fs.copyFileSync(target, `${target}${CONFIG_BACKUP_SUFFIX}`);
       }
-      // 回写时无法保留用户注释（yaml.stringify 会重新格式化），
-      // 因此仅在确有变化时写盘，且写的是完整配置对象。
-      fs.writeFileSync(target, stringifyYaml(config, { indent: 2 }), 'utf8');
+      fs.writeFileSync(target, text, 'utf8');
+      // 记下"这份内容是我自己写的"，供 isSelfWrite() 分辨自回声
+      this.lastWrittenText = text;
       this.logger.info(`配置已写回：${target}`);
     } catch (err) {
       this.logger.error(`配置写回失败（${target}）：${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * 磁盘上的内容是否就是应用自己刚写下去的（"自回声"）。
+   *
+   * 【为什么要分辨】写回位置/托盘开关之后，文件监听器**必然**醒来并触发一次
+   * 热重载 —— 那是应用自己的动作，不该弹「配置已重载」打扰用户。
+   * 那条提示的意义是"用户改了配置文件，我读到了"，只该为真实的用户改动出现。
+   *
+   * 判据刻意用**内容相等**而不是"距上次写盘 N 毫秒内"：时间窗口既可能误伤
+   * （用户恰好在这一秒里改了文件，提示被吞掉），也可能漏判（系统卡顿导致
+   * 监听器迟到）。内容相等没有歧义 —— 磁盘上就是我自己写的那一份，说明没人动过。
+   */
+  isSelfWrite(): boolean {
+    if (this.lastWrittenText === null) {
+      return false;
+    }
+    try {
+      return fs.readFileSync(this.cachedPath, 'utf8') === this.lastWrittenText;
+    } catch {
+      return false;
     }
   }
 
