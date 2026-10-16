@@ -353,6 +353,14 @@ dsh 与 sqlite 型的完整示例见 [`config.dsh.example.yaml`](./config.dsh.ex
 「可显示任务」= 已排除失联（`unknown`）/ 失败（`failed`）的行 ——
 浮窗里出现的默认就该是活着的（口径见 `src/shared/visibility.ts`）。
 
+| 贴侧边：竖排点阵 | 贴顶部：横排点阵 |
+|---|---|
+| ![竖排点阵](./deliverables/dock-vertical.png) | ![横排点阵](./deliverables/dock-horizontal.png) |
+| 36×79（该时刻 2 个任务） | 75×40（该时刻 2 个任务） |
+
+> 两张图是**真实截图**（CDP 直接抓的 overlay 画布，未经修图），
+> 所以尺寸就是窗口实际像素 —— 底板的半透明在深色桌面上会更沉一些。
+
 **怎么用**：把灯拖到屏幕的左 / 右 / 上边缘松手，约 0.2 秒后它自己收敛成点阵；
 拖回桌面中间，又自动展开回带标签的灯带。**不需要任何配置**。
 
