@@ -42,9 +42,9 @@ function resolveElectronBin() {
   return require('node:fs').readFileSync(pathTxt, 'utf8').trim();
 }
 
-// 分隔符之后的都作为传给 Electron 的参数
+// npm 会消耗自身的 --，因此直接参数也要转发；保留旧的显式分隔符调用。
 const argv = process.argv.slice(2);
-const passthrough = argv.includes('--') ? argv.slice(argv.indexOf('--') + 1) : [];
+const passthrough = argv.includes('--') ? argv.slice(argv.indexOf('--') + 1) : argv;
 
 /**
  * 组装子进程环境：剔除会破坏 GUI 的变量。

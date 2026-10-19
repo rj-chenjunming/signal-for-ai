@@ -104,6 +104,8 @@ npm run build && npm start -- --config D:/path/to/your-config.yaml
 
 Codex 使用 `type: codex` 读取本地 `.codex/sessions` 的结构化 rollout 事件。支持 `sessionsDir`、`intervalMs`（默认 2000）、`activeWithinMs`（默认 300000）；不会在启动时重放历史完成，不保证读取审批等待。详细边界与完整示例见 [桌面指南](./docs/development/desktop-validation.md)。
 
+Codex 回合完成后保留绿灯，点击确认或默认十分钟到期后显示灰色空闲行；新的回合显示蓝灯。采集器分块追平并保留长回合的开始证据，历史未知会话不会抹掉本轮明确完成；首次读取很大的会话文件可能需要数轮轮询。修复与验证见 [SPEC-010](./docs/specs/010-codex-completion-continuity.md)。
+
 ### 方式一：process —— 监听本地进程与命令行参数
 
 适用：任务有明确的常驻进程（如 WorkBuddy 主进程、某个 IDE、CI runner）。

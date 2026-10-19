@@ -5,6 +5,8 @@
 | Spec ID | 文档 | 类型 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
 | BASELINE-000 | [当前基线](000-baseline.md) | 接管现状 | observed | 从当前提交核对，不补造历史 TDD |
+| SPEC-010 | [Codex 完成灯与长回合连续性](010-codex-completion-continuity.md) | 修复 | done | 722 项回归全过；真机蓝→绿连续保留 PASS，用户确认效果；点击矩阵仍归 SPEC-002 |
+| SPEC-009 | [启动器配置参数转发](009-start-cli-arguments.md) | 修复 | done | 有效 Red/Green、709 项回归、Windows 指定配置启动通过；与 SPEC-010 一并按用户要求本地提交 |
 | SPEC-008 | [软删除会话被当成完成](008-soft-deleted-sessions.md) | 修复 | verifying | SQL 排除 `deleted_at > 0`；老库无该列时兼容 |
 | SPEC-007 | [自动熄灭后重复亮绿](007-dismiss-reannounce.md) | 修复 | verifying | dismiss 同时确认水位；重启不为陈旧完成亮绿 |
 | SPEC-006 | [dsh 回合完成亮绿](006-dsh-turn-success.md) | 修复 / 能力补齐 | verifying | dsh 此前永不产生 success；现按回合完成推断 |
