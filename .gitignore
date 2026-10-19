@@ -33,7 +33,14 @@ extension/crx/
 # 真实取值放 config.local.yaml，脚本通过 scripts/lib/local-config.mjs 读取它。
 # ---------------------------------------------------------------------------
 config.local.yaml
+# ★ 连同它的各种变体一起忽略（`.bak`、`.bak-20261019-1112` 这类备份）
+#
+# 这些备份里装的是**同一份真实主机名与路径**。只写死 `config.local.yaml` 是不够的：
+# 编辑器/脚本生成的带时间戳备份名字不完全一样，就会绕过规则，
+# 一旦某次 `git add -A` 就会被推进公开仓库 —— 这条规则是给那种情况兜底的。
+config.local.yaml*
 config.yaml
+config.yaml.*
 
 # 本机私有的"额外脱敏规则"（含真实取值，例如组织 scope）——
 # scripts/sync-docs.mjs 会读它，但绝不入库
