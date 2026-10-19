@@ -157,7 +157,13 @@ export interface WebhookFieldMap {
  */
 export interface DshMonitorConfig extends MonitorConfigBase {
   type: 'dsh';
-  /** 目标实例，形如 `127.0.0.1:3080`。cookie 名与签名都绑定它。 */
+  /**
+   * 目标实例，形如 `127.0.0.1:3080`；cookie 名与签名都绑定它。
+   *
+   * 也可写 `auto`（SPEC-005）：自动发现本机**能用本机密钥认证**的实例。
+   * 桌面端 dsh 每次启动都会换端口（3080 → 19387 → 52119 实测），写死会让灯
+   * 在 dsh 重启后永久变灰。
+   */
   authority: string;
   /** 本机 dsh 配置目录（含 `.credentials.yaml`），默认 `%USERPROFILE%/.dsh`。 */
   dshHome?: string;

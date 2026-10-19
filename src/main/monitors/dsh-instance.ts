@@ -107,6 +107,22 @@ export interface DshSessionListItem {
       readonly subagentCatalog?: readonly { readonly id?: string; readonly settledAt?: number }[];
       readonly permissions?: { readonly currentValue?: string };
       readonly contextPressure?: { readonly pressureTokens?: number; readonly contextWindow?: number };
+      /**
+       * 回合轮廓（SPEC-006）。
+       *
+       * 最后一项 `response` 非空 = 该回合的助手回复已落盘（回合结束）；
+       * 正在跑的回合是空串。dsh 的 session/list 没有 status 字段，
+       * 这就是"完成"最可靠的证据。
+       */
+      readonly turnOutline?: readonly {
+        readonly turn?: number;
+        readonly prompt?: string;
+        readonly response?: string;
+      }[];
+      /** 会话统计（turns/steps/耗时），当前只用到 turns。 */
+      readonly sessionStats?: { readonly turns?: number };
+      /** 会话列表元数据；`lastPromptAt` 是每回合稳定且递增的时刻（SPEC-006 用作确认水位）。 */
+      readonly sessionListMetadata?: { readonly blank?: boolean; readonly lastPromptAt?: number };
       readonly tokenUsage?: {
         readonly uncachedInputTokens?: number;
         readonly outputTokens?: number;
@@ -430,11 +446,25 @@ export function deriveSessionStatus(input: {
   readonly errorMessage?: string;
   /** 静默多久算「不在跑了」，默认 60s（PRD §5.4 防灯一直是绿的）。 */
   readonly silenceMs?: number;
+  /**
+   * `running===true` 时用的静默阈值，默认 10 分钟（SPEC-004）。
+   *
+   * 为什么需要单独一档：桌面端 dsh 的 `session/list` 里 `updatedAt`
+   * **只在回合边界推进**，长回合中间完全不动。实测取样：`running=true`、
+   * 静默 289 秒，会话确实在跑，却因为 60 秒阈值被判 idle —— 灯在回合开始
+   * 约 1 分钟后从蓝变灰。
+   *
+   * 阈值取在两条实测值之间：长回合实测 289 秒仍在跑；"执行完还显示运行中"
+   * 的陈旧样本是 727 秒。显式传 `silenceMs` 时沿用"全局收紧"的既有语义。
+   */
+  readonly runningSilenceMs?: number;
   /** 刚刚有活动 → 视为 starting 的窗口，默认 5s。 */
   readonly connectGraceMs?: number;
 }): TaskStatus {
   const now = input.now ?? Date.now();
   const silenceMs = input.silenceMs ?? 60_000;
+  // 显式给了 silenceMs 就按它收紧 running 档（保持"阈值可配置"的既有语义）
+  const runningSilenceMs = input.runningSilenceMs ?? (input.silenceMs ?? 600_000);
   const connectGraceMs = input.connectGraceMs ?? 5_000;
 
   // failed 一票否决（PRD §4.4：failed 优先级最高）
@@ -459,10 +489,15 @@ export function deriveSessionStatus(input: {
    * 语义依据：PRD §5.4「防灯一直是绿的」的镜像要求 ——
    * 也**不能一直是蓝的**。静默超过阈值就说明没人在这条会话上干活了。
    * `updatedAt` 缺失时不做此判定（没有时间信息就不能假设它静默了）。
+   *
+   * ★ SPEC-004：`running===true` 用更宽的阈值（默认 10 分钟）——桌面端
+   * `updatedAt` 只在回合边界推进，长回合中间必然"静默"，用 60 秒会误灭蓝灯。
+   * 阈值仍在两条实测值之间，727 秒级的陈旧 running 照样会被判 idle。
    */
+  const effectiveSilenceMs = input.running === true ? runningSilenceMs : silenceMs;
   if (
     input.updatedAt !== undefined &&
-    now - input.updatedAt > silenceMs &&
+    now - input.updatedAt > effectiveSilenceMs &&
     input.pendingInteraction === undefined
   ) {
     return 'idle';

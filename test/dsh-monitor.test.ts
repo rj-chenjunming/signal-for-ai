@@ -629,3 +629,246 @@ describe('LocalCredentialsSource', () => {
     await expect(source.get('127.0.0.1:1')).rejects.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// SPEC-005：authority=auto 的自动发现接线
+// ---------------------------------------------------------------------------
+describe('DshMonitor —— SPEC-005 authority=auto', () => {
+  let fake: ReturnType<typeof makeFakeDsh>;
+  let authority: string;
+
+  beforeAll(async () => {
+    fake = makeFakeDsh();
+    await new Promise<void>((resolve) => fake.server.listen(0, '127.0.0.1', resolve));
+    authority = `127.0.0.1:${(fake.server.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => fake.server.close(() => resolve()));
+  });
+
+  it('首次轮询自动发现并连上；后续轮询复用已选端口，不重复发现', async () => {
+    await fake.okSessions([sessionItem({ running: true })]);
+    const recording = new RecordingSink();
+    let discovers = 0;
+    const monitor = new DshMonitor(makeCtx(recording.sink, { authority: 'auto' }), {
+      secretSources: [new StaticSecretSource(SECRET)],
+      discoverAuthority: async () => {
+        discovers += 1;
+        return authority;
+      },
+    });
+
+    const first = await monitor.pollOnce();
+    expect(discovers).toBe(1);
+    expect(first.ok).toBe(true);
+    expect(recording.lastStatus()).toBe('running');
+
+    await monitor.pollOnce();
+    expect(discovers).toBe(1); // 复用缓存的 authority
+    await monitor.stop();
+  });
+
+  it('连续失败后重新发现，并恢复到新端口（桌面端换端口的场景）', async () => {
+    await fake.okSessions([sessionItem()]);
+    const recording = new RecordingSink();
+    const picked: string[] = [];
+    const dead = '127.0.0.1:1'; // 必然不可达
+    const monitor = new DshMonitor(makeCtx(recording.sink, { authority: 'auto' }), {
+      secretSources: [new StaticSecretSource(SECRET)],
+      discoverAuthority: async () => {
+        const next = picked.length === 0 ? dead : authority;
+        picked.push(next);
+        return next;
+      },
+    });
+
+    expect((await monitor.pollOnce()).ok).toBe(false); // 第 1 次失败：连 dead 端口
+    expect((await monitor.pollOnce()).ok).toBe(false); // 第 2 次失败：触发重新发现
+    expect((await monitor.pollOnce()).ok).toBe(true); // 第 3 轮：新端口可用
+
+    expect(picked).toEqual([dead, authority]);
+    await monitor.stop();
+  });
+
+  it('发现失败时不崩：按失败计数处理，最终转 unknown', async () => {
+    const recording = new RecordingSink();
+    const monitor = new DshMonitor(makeCtx(recording.sink, { authority: 'auto' }), {
+      secretSources: [new StaticSecretSource(SECRET)],
+      discoverAuthority: async () => null,
+    });
+
+    for (let i = 0; i < 5; i += 1) {
+      await monitor.pollOnce();
+    }
+    expect(recording.statuses()).toContain('unknown');
+    await monitor.stop();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SPEC-006：dsh 回合结束后亮绿灯（此前 dsh 永远不会产生 success）
+// ---------------------------------------------------------------------------
+describe('DshMonitor —— SPEC-006 回合完成 -> success', () => {
+  let fake: ReturnType<typeof makeFakeDsh>;
+  let authority: string;
+
+  beforeAll(async () => {
+    fake = makeFakeDsh();
+    await new Promise<void>((resolve) => fake.server.listen(0, '127.0.0.1', resolve));
+    authority = `127.0.0.1:${(fake.server.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => fake.server.close(() => resolve()));
+  });
+
+  const doneTurn = (turn: number) => ({ turn, prompt: 'p', response: '写完了' });
+  const liveTurn = (turn: number) => ({ turn, prompt: 'p', response: '' });
+
+  /** 一个会话条目（可指定轮次轮廓与最近提示时刻）。 */
+  const item = (over: {
+    sessionId?: string;
+    running?: boolean;
+    updatedAt?: number;
+    outline?: readonly { turn?: number; prompt?: string; response?: string }[];
+    lastPromptAt?: number;
+  }): Record<string, unknown> =>
+    sessionItem({
+      sessionId: over.sessionId ?? 'session-a',
+      running: over.running ?? false,
+      updatedAt: over.updatedAt ?? Date.now() - 5_000,
+      projections: {
+        values: {
+          plan: { active: false, pending: false },
+          subagentCatalog: [],
+          ...(over.outline === undefined ? {} : { turnOutline: over.outline }),
+          ...(over.lastPromptAt === undefined
+            ? {}
+            : { sessionListMetadata: { blank: false, lastPromptAt: over.lastPromptAt } }),
+        },
+      },
+    });
+
+  const makeMonitor = (recording: RecordingSink) =>
+    new DshMonitor(makeCtx(recording.sink, { authority: 'auto' }), {
+      secretSources: [new StaticSecretSource(SECRET)],
+      discoverAuthority: async () => authority,
+    });
+
+  const statusEvents = (recording: RecordingSink) =>
+    recording.events
+      .filter((e) => e.ev.kind === 'status')
+      .map((e) => e.ev as Extract<MonitorEvent, { kind: 'status' }>);
+
+  it('AC-01 回合结束 → success，且 updatedAt 陈旧也不影响（真机里完成时 updatedAt 不推进）', async () => {
+    const recording = new RecordingSink();
+    const monitor = makeMonitor(recording);
+    const stale = Date.now() - 3_600_000;
+
+    // 第一轮：第 1 回合已完成，第 2 回合在跑（updatedAt 新鲜，running 才判得出来）
+    await fake.okSessions([
+      item({ running: true, updatedAt: Date.now() - 5_000, outline: [doneTurn(1), liveTurn(2)] }),
+    ]);
+    await monitor.pollOnce();
+    expect(recording.lastStatus()).toBe('running');
+
+    // 第 2 回合完成：updatedAt 仍然陈旧，只有 turnOutline 末项 response 变非空
+    const promptAt = Date.now();
+    await fake.okSessions([
+      item({ updatedAt: stale, outline: [doneTurn(1), doneTurn(2)], lastPromptAt: promptAt }),
+    ]);
+    await monitor.pollOnce();
+    expect(recording.lastStatus()).toBe('success');
+    expect(statusEvents(recording).at(-1)?.completionAt).toBe(promptAt);
+
+    // 再轮询一次：绿灯必须保持（同一 completionAt），否则 5 秒后就变灰
+    await monitor.pollOnce();
+    expect(recording.lastStatus()).toBe('success');
+    expect(statusEvents(recording).at(-1)?.completionAt).toBe(promptAt);
+    await monitor.stop();
+  });
+
+  it('AC-02 启动前就完成的会话不补亮绿灯（启动基线）', async () => {
+    const recording = new RecordingSink();
+    const monitor = makeMonitor(recording);
+    await fake.okSessions([item({ outline: [doneTurn(1)], lastPromptAt: Date.now() - 3_600_000 })]);
+    await monitor.pollOnce();
+
+    expect(recording.lastStatus()).toBe('idle');
+    expect(statusEvents(recording).some((e) => e.status === 'success')).toBe(false);
+    await monitor.stop();
+  });
+
+  it('AC-03 被打断（最后回合 response 为空）不算完成', async () => {
+    const recording = new RecordingSink();
+    const monitor = makeMonitor(recording);
+    await fake.okSessions([item({ running: true, outline: [doneTurn(1), liveTurn(2)] })]);
+    await monitor.pollOnce();
+    expect(recording.lastStatus()).toBe('running');
+
+    await fake.okSessions([item({ running: false, outline: [doneTurn(1), liveTurn(2)] })]);
+    await monitor.pollOnce();
+    expect(recording.lastStatus()).not.toBe('success');
+    await monitor.stop();
+  });
+
+  it('AC-04 一个会话在跑、另一个刚完成 → running 优先', async () => {
+    const recording = new RecordingSink();
+    const monitor = makeMonitor(recording);
+    await fake.okSessions([
+      item({ sessionId: 'session-a', outline: [doneTurn(1)] }),
+      item({ sessionId: 'session-b', outline: [liveTurn(1)] }),
+    ]);
+    await monitor.pollOnce();
+
+    await fake.okSessions([
+      item({ sessionId: 'session-a', running: true, outline: [doneTurn(1), liveTurn(2)] }),
+      item({ sessionId: 'session-b', outline: [doneTurn(1)], lastPromptAt: Date.now() }),
+    ]);
+    await monitor.pollOnce();
+    expect(recording.lastStatus()).toBe('running');
+    await monitor.stop();
+  });
+
+  it('AC-05 上一轮 failed 之后不点亮 success（禁止转移）', async () => {
+    const recording = new RecordingSink();
+    const monitor = makeMonitor(recording);
+    fake.setBehaviour({ status: 500 });
+    await monitor.pollOnce();
+    expect(recording.lastStatus()).toBe('failed');
+
+    await fake.okSessions([item({ outline: [doneTurn(1)], lastPromptAt: Date.now() })]);
+    await monitor.pollOnce();
+    expect(recording.lastStatus()).not.toBe('success');
+    expect(statusEvents(recording).some((e) => e.status === 'success')).toBe(false);
+    await monitor.stop();
+  });
+
+  it('AC-06 连续两个回合各自点亮一次（completionAt 递增，不复用旧水位）', async () => {
+    const recording = new RecordingSink();
+    const monitor = makeMonitor(recording);
+    await fake.okSessions([item({ outline: [doneTurn(1)], lastPromptAt: Date.now() - 60_000 })]);
+    await monitor.pollOnce();
+    expect(recording.lastStatus()).toBe('idle');
+
+    const t2 = Date.now();
+    await fake.okSessions([item({ outline: [doneTurn(1), doneTurn(2)], lastPromptAt: t2 })]);
+    await monitor.pollOnce();
+    expect(recording.lastStatus()).toBe('success');
+    expect(statusEvents(recording).at(-1)?.completionAt).toBe(t2);
+
+    // 第 3 回合开始（running）→ 蓝
+    await fake.okSessions([item({ running: true, outline: [doneTurn(1), doneTurn(2), liveTurn(3)] })]);
+    await monitor.pollOnce();
+    expect(recording.lastStatus()).toBe('running');
+
+    const t3 = Date.now() + 1_000;
+    await fake.okSessions([item({ outline: [doneTurn(1), doneTurn(2), doneTurn(3)], lastPromptAt: t3 })]);
+    await monitor.pollOnce();
+    expect(recording.lastStatus()).toBe('success');
+    expect(statusEvents(recording).at(-1)?.completionAt).toBe(t3);
+    await monitor.stop();
+  });
+});

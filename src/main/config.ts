@@ -653,27 +653,34 @@ function validateDshMonitor(
 ): DshMonitorConfig | null {
   const authority = typeof raw.authority === 'string' ? raw.authority.trim() : '';
   if (authority.length === 0) {
-    warn(`任务 ${taskId}: dsh.authority 缺失（应形如 127.0.0.1:3080），已丢弃该任务`);
+    warn(`任务 ${taskId}: dsh.authority 缺失（应形如 127.0.0.1:3080，或 auto），已丢弃该任务`);
     return null;
   }
 
+  // SPEC-005：`auto` = 自动发现本机可认证的 dsh 实例（桌面端每次启动换端口）。
+  const isAuto = authority.toLowerCase() === 'auto';
+
   // authority 必须是 host:port —— cookie 的名字与签名都绑定它，写错就必然 401
-  const colon = authority.lastIndexOf(':');
-  const host = colon === -1 ? '' : authority.slice(0, colon);
-  const port = colon === -1 ? Number.NaN : Number(authority.slice(colon + 1));
+  const colon = isAuto ? 0 : authority.lastIndexOf(':');
+  const host = isAuto ? 'auto' : colon === -1 ? '' : authority.slice(0, colon);
+  const port = isAuto ? 1 : colon === -1 ? Number.NaN : Number(authority.slice(colon + 1));
   if (host.length === 0 || !Number.isInteger(port) || port <= 0 || port > 65_535) {
     warn(
-      `任务 ${taskId}: dsh.authority=${authority} 不是合法的 host:port（应形如 127.0.0.1:3080），已丢弃该任务`,
+      `任务 ${taskId}: dsh.authority=${authority} 不是合法的 host:port 或 auto（应形如 127.0.0.1:3080），已丢弃该任务`,
     );
     return null;
   }
 
-  const cfg: DshMonitorConfig = { type: 'dsh', authority };
+  const cfg: DshMonitorConfig = { type: 'dsh', authority: isAuto ? 'auto' : authority };
+
+  if (isAuto && typeof raw.sshHost === 'string' && raw.sshHost.length > 0) {
+    warn(`任务 ${taskId}: dsh.authority=auto 时不会用 sshHost（自动发现只认本机能认证的实例），已忽略`);
+  }
 
   if (typeof raw.dshHome === 'string' && raw.dshHome.length > 0) {
     cfg.dshHome = raw.dshHome;
   }
-  if (typeof raw.sshHost === 'string' && raw.sshHost.length > 0) {
+  if (typeof raw.sshHost === 'string' && raw.sshHost.length > 0 && !isAuto) {
     cfg.sshHost = raw.sshHost;
   }
 

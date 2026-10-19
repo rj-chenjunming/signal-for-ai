@@ -365,6 +365,45 @@ describe('deriveSessionStatus —— 优先级与语义', () => {
       expect(deriveSessionStatus(input)).toBe('running'); // 默认 60s
       expect(deriveSessionStatus({ ...input, silenceMs: 10_000 })).toBe('idle'); // 收紧到 10s
     });
+
+    // -----------------------------------------------------------------------
+    // SPEC-004：桌面端长回合"在跑却被判空闲"
+    // -----------------------------------------------------------------------
+    // 桌面端 dsh 的 session/list 里 updatedAt **只在回合边界推进**，长回合中间
+    // 完全不动。实测取样（2026-10-19）：running=true、agentAvailable=true、
+    // updatedAt 距今 289 秒 —— 那时会话确实在跑，但 60 秒静默阈值已经把它判成
+    // idle，于是灯在回合开始约 1 分钟后从蓝变灰并一直灰着。
+    describe('SPEC-004 桌面端长回合：running 的静默阈值更宽', () => {
+      it('AC-01 running=true 静默 289s（真机数字）→ running', () => {
+        expect(
+          deriveSessionStatus({ running: true, agentAvailable: true, now: NOW, updatedAt: NOW - 289_000 }),
+        ).toBe('running');
+      });
+
+      it('AC-02 静默 9 分钟仍在跑 → running', () => {
+        expect(
+          deriveSessionStatus({ running: true, agentAvailable: true, now: NOW, updatedAt: NOW - 540_000 }),
+        ).toBe('running');
+      });
+
+      it('AC-03 静默超过 10 分钟 → idle（陈旧 running 仍要防）', () => {
+        expect(
+          deriveSessionStatus({ running: true, agentAvailable: true, now: NOW, updatedAt: NOW - 601_000 }),
+        ).toBe('idle');
+      });
+
+      it('阈值可注入：runningSilenceMs 收紧后同样的静默变 idle', () => {
+        expect(
+          deriveSessionStatus({
+            running: true,
+            agentAvailable: true,
+            now: NOW,
+            updatedAt: NOW - 540_000,
+            runningSilenceMs: 500_000,
+          }),
+        ).toBe('idle');
+      });
+    });
   });
 
   it('errorMessage 一票否决：即使同时在等授权也判 failed', () => {

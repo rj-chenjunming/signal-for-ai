@@ -233,13 +233,32 @@ export class ExtensionBridge {
       return;
     }
 
+    // SPEC-003：扩展自报状态。诊断"点击为什么退回新开"时，主进程日志能被
+    // 扩展主动说清"我起来了/offscreen 建没建成/轮询在谁身上"，不用再去翻
+    // chrome://extensions 的控制台。
+    if (req.method === 'POST' && url.pathname === '/status') {
+      void this.handleStatus(req, res);
+      return;
+    }
+
     this.sendJson(res, 404, { ok: false, error: 'not found' });
   }
 
   /** 长轮询：有 pending 立刻回（不清空），否则挂起等被点击唤醒 / 20s 超时。 */
   private handlePoll(req: http.IncomingMessage, res: http.ServerResponse): void {
     // 心跳：能走到这里就说明有一个扩展在轮询
+    const previousPollAt = this.lastPollAt;
     this.lastPollAt = Date.now();
+
+    // SPEC-003/AC-04：从"没有扩展"变成"有扩展"时打一次，用来现场回答
+    // 「扩展到底连上没有」。点击静默退回新开标签页的根因就是这条信息缺失：
+    // 只看日志只有"已打开 URL"，看不出是扩展没响应还是根本没装。
+    // 连续轮询间隔远小于在线窗口（20s 挂起 + 立刻重连），所以不会刷屏。
+    if (previousPollAt === 0 || this.lastPollAt - previousPollAt > EXTENSION_CONNECTED_WINDOW_MS) {
+      this.logger?.info(
+        '浏览器扩展已连接（开始轮询），URL 型任务点击将切到已打开的标签页',
+      );
+    }
 
     if (this.pending) {
       this.sendJson(res, 200, { ok: true, command: this.pending });
@@ -296,8 +315,37 @@ export class ExtensionBridge {
     this.sendJson(res, 200, { ok: true });
   }
 
-  private sendJson(res: http.ServerResponse, status: number, payload: unknown): void {
-    // 与 HookServer 一致：**不设置任何 CORS 头**
+  /**
+   * 扩展自报状态（SPEC-003）。
+   *
+   * 【为什么需要这个通道】点击退回"新开标签页"时，主进程原本只能看到
+   * "扩展没在轮询"，看不出是 SW 没起来、offscreen 建失败、还是根本没装。
+   * 让扩展在唤醒时 POST 一次状态，日志就能回答这个问题。
+   */
+  private async handleStatus(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    let body: Record<string, unknown> = {};
+    try {
+      const raw = await readBody(req, RESULT_BODY_LIMIT_BYTES);
+      const parsed: unknown = JSON.parse(raw.toString('utf8') || '{}');
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch {
+      /* 畸形 body 只当作"没有细节"，不报错 */
+    }
+
+    const field = (key: string): string =>
+      typeof body[key] === 'string' && (body[key] as string).length > 0
+        ? (body[key] as string)
+        : '未知';
+    this.logger?.info(
+      `扩展自报：版本=${field('version')} 唤醒=${field('via')} offscreen=${field('offscreen')} ` +
+        `定时器=${field('alarm')} 轮询=${field('polling')}`,
+    );
+    this.sendJson(res, 200, { ok: true });
+  }
+
+  private sendJson(res: http.ServerResponse, status: number, payload: unknown): void {    // 与 HookServer 一致：**不设置任何 CORS 头**
     const text = JSON.stringify(payload ?? {});
     res.writeHead(status, {
       'Content-Type': 'application/json; charset=utf-8',

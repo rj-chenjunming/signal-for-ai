@@ -514,6 +514,16 @@ export class TaskStore {
         case 'failed': {
           // dismiss_after：已完成任务自动清理，避免列表堆积（PRD §5.4）
           if (at - since >= this.timeouts.dismissAfterMs) {
+            // SPEC-007：自动熄灭 = "已经展示过这次完成"，必须同时把完成水位
+            // 记进已确认。否则轮询型监控（sqlite/dsh）下一轮还会读到同一个
+            // 完成（lastDoneAt > acked=0），绿灯每 10 分钟自己亮一次 ——
+            // 用户现场：「WorkBuddy 没在跑东西，隔一段时间就自己亮绿灯」。
+            if (task.lastCompletionAt !== undefined) {
+              task.ackedCompletionAt = Math.max(
+                task.ackedCompletionAt ?? 0,
+                task.lastCompletionAt,
+              );
+            }
             const ch = this.apply(id, { status: 'idle' }, { isSystemEvent: true });
             if (ch) changes.push(ch);
           }

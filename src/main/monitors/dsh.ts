@@ -148,6 +148,13 @@ export interface DshMonitorOptions {
   /** 密钥来源链，按顺序取第一个 supports() 为真的。 */
   readonly secretSources: readonly SecretSource[];
   /**
+   * SPEC-005：`authority: auto` 时用来发现本机实例。
+   *
+   * 返回 `null` = 这轮没找到（按失败计数处理，下一轮重试）。不注入就说明装配
+   * 有问题：auto 模式会直接抛错，而不是静默什么都不监控。
+   */
+  readonly discoverAuthority?: () => Promise<string | null>;
+  /**
    * 可选：插件上报的精确等待信号。
    * 键是 sessionId，值是插件的 `pendingInteraction` / `errorMessage`。
    * 未注入时退化为 `plan.pending` 近似路径（D2 的"插件失效自动退回"）。
@@ -172,6 +179,13 @@ export class DshMonitor extends MonitorAdapter {
   private readonly options: DshMonitorOptions;
 
   private client: DshClient | null = null;
+  /**
+   * 实际使用的 authority。
+   *
+   * `cfg.authority === 'auto'` 时这里是 undefined，首次轮询时由发现结果填入；
+   * 连续失败后会清空，让下一轮重新发现（SPEC-005）。
+   */
+  private authority: string | undefined;
   /** 当前使用的密钥来源（401 时需要让它失效重取）。 */
   private source: SecretSource | undefined;
   /** 是否已经因认证被拒而失效过一次凭据（避免每轮都跑 SSH）。 */
@@ -185,6 +199,23 @@ export class DshMonitor extends MonitorAdapter {
 
   /** 最近一次成功轮询时刻，用于心跳超时判定。 */
   private lastSuccessAt = 0;
+  /** 最后一次上报的状态（判定"禁止转移到 success"用）。 */
+  private lastEmitted: TaskStatus | undefined;
+  /**
+   * 每个会话的"已完成回合数"基线（SPEC-006）。
+   * 只有这个数字变大才说明新增了一个完成的回合。
+   */
+  private readonly completedTurns = new Map<string, number>();
+  /** 是否已经捕获过启动基线（首轮成功轮询）。 */
+  private baselineCaptured = false;
+  /**
+   * 待用户确认的完成水位（SPEC-006）。
+   *
+   * 绿灯必须**保持**到用户点击确认或新回合开始 —— 否则每轮轮询都重算一次
+   * "这一轮有没有新完成"，第二轮就没有了，绿灯亮 5 秒就自己变灰。
+   * 确认闸门由 store 负责（点掉后同水位的上报会被丢弃）。
+   */
+  private pendingCompletionAt: number | undefined;
   /** 当前是否正在执行一轮（防止慢轮询叠加）。 */
   private polling = false;
 
@@ -201,6 +232,7 @@ export class DshMonitor extends MonitorAdapter {
     }
     this.cfg = ctx.task.monitor;
     this.options = options;
+    this.authority = this.cfg.authority === 'auto' ? undefined : this.cfg.authority;
   }
 
   /** 供测试/面板读取逐会话状态。 */
@@ -220,12 +252,17 @@ export class DshMonitor extends MonitorAdapter {
     this.failureCount = 0;
     this.reportedUnknown = false;
     this.lastSuccessAt = Date.now();
+    // SPEC-006：重启/热重载后重建基线，避免把历史完成当成新完成
+    this.completedTurns.clear();
+    this.baselineCaptured = false;
+    this.pendingCompletionAt = undefined;
+    this.lastEmitted = undefined;
 
     // 立即跑一轮：不要把首次判定推迟一个轮询间隔（否则灯会先灰一下）
     void this.pollOnce();
 
     this.log.info(
-      `已启动 dsh 监控 authority=${this.cfg.authority} interval=${this.intervalMs}ms` +
+      `已启动 dsh 监控 authority=${this.cfg.authority === 'auto' ? 'auto（自动发现）' : this.cfg.authority} interval=${this.intervalMs}ms` +
         (this.cfg.sshHost === undefined ? '' : ` sshHost=${this.cfg.sshHost}`),
     );
   }
@@ -263,18 +300,47 @@ export class DshMonitor extends MonitorAdapter {
    *
    * 会把当前使用的来源记在 `this.source`，供 401 时失效重取（D5 的远端兜底）。
    */
+  /** 打日志/上报用：auto 模式下显示实际选中的端口，而不是字面量 auto。 */
+  private get authorityLabel(): string {
+    return this.authority ?? 'auto';
+  }
+
+  /**
+   * 解析本次要连的 authority（SPEC-005）。
+   *
+   * 显式配置时直接用；`auto` 时调用注入的发现器，选中的端口会缓存到
+   * `this.authority`，直到连续失败把它清空。
+   */
+  private async resolveAuthority(): Promise<string> {
+    if (this.authority !== undefined) {
+      return this.authority;
+    }
+    const discover = this.options.discoverAuthority;
+    if (discover === undefined) {
+      throw new Error('authority=auto 但没有注入自动发现（装配错误）');
+    }
+    this.log.info('authority=auto：开始自动发现本机 dsh 实例');
+    const found = await discover();
+    if (found === null) {
+      throw new Error('自动发现失败：本机没有能用本机密钥认证的 dsh 实例');
+    }
+    this.authority = found;
+    return found;
+  }
+
   private async ensureClient(): Promise<DshClient> {
     if (this.client !== null) {
       return this.client;
     }
-    const source = this.options.secretSources.find((s) => s.supports(this.cfg.authority));
+    const authority = await this.resolveAuthority();
+    const source = this.options.secretSources.find((s) => s.supports(authority));
     if (source === undefined) {
-      throw new Error(`没有可用的密钥来源支持 ${this.cfg.authority}`);
+      throw new Error(`没有可用的密钥来源支持 ${authority}`);
     }
     this.source = source;
-    const secret = await source.get(this.cfg.authority);
+    const secret = await source.get(authority);
     this.client = new DshClient({
-      authority: this.cfg.authority,
+      authority,
       secret,
       timeoutMs: this.cfg.timeoutMs ?? 8_000,
     });
@@ -372,7 +438,33 @@ export class DshMonitor extends MonitorAdapter {
       statuses.push(status);
     }
 
-    const aggregated = aggregate(statuses);
+    // SPEC-006：从会话列表推断"回合完成"。
+    // 只认 turnOutline 里"已完成回合数"的增加，**不看 updatedAt** ——
+    // 2026-10-19 真机证明 updatedAt 在完成时并不推进（回合结束后仍停在旧边界）。
+    const anyRunning = statuses.some((s) => s === 'running');
+    const finishedNow = this.advanceCompletedTurns(items);
+    if (finishedNow !== undefined) {
+      this.pendingCompletionAt = finishedNow;
+      this.log.info(
+        `回合完成：${this.authorityLabel}（completionAt=${finishedNow}，${statuses.length} 会话）`,
+      );
+    }
+    if (anyRunning) {
+      // 新回合已经开始：上一轮的"待确认完成"作废，等这一轮结束再点亮
+      this.pendingCompletionAt = undefined;
+    }
+
+    let aggregated = aggregate(statuses);
+    if ((aggregated === 'idle' || aggregated === 'starting') && this.pendingCompletionAt !== undefined) {
+      // failed/unknown -> success 是禁止转移：宁可保持 idle，也不制造非法上报
+      if (this.lastEmitted === 'failed' || this.lastEmitted === 'unknown') {
+        this.log.info(
+          `检测到 ${this.authorityLabel} 有新回合完成，但上一状态是 ${this.lastEmitted}（禁止直接转到 success），保持 idle`,
+        );
+      } else {
+        aggregated = 'success';
+      }
+    }
 
     this.lastOutcome = {
       ok: true,
@@ -383,12 +475,86 @@ export class DshMonitor extends MonitorAdapter {
 
     // 上报聚合态。message 里带上会话数与在跑的会话数，便于面板一眼看出规模。
     const runningCount = statuses.filter((s) => s === 'running' || s === 'waiting').length;
-    this.emitStatus(
+    const message =
+      aggregated === 'success'
+        ? `dsh ${this.authorityLabel}：回合完成，点击确认`
+        : `dsh ${this.authorityLabel}：${statuses.length} 会话` +
+          (runningCount > 0 ? `，${runningCount} 个活跃` : '');
+    this.emitStatusTracked(
       aggregated,
-      `dsh ${this.cfg.authority}：${statuses.length} 会话` +
-        (runningCount > 0 ? `，${runningCount} 个活跃` : ''),
+      message,
+      now,
+      aggregated === 'success' && this.pendingCompletionAt !== undefined
+        ? { completionAt: this.pendingCompletionAt }
+        : {},
     );
     return this.lastOutcome;
+  }
+
+  /**
+   * 推进"已完成回合数"基线，返回本次新完成回合的时刻（SPEC-006）。
+   *
+   * 判据：会话 `turnOutline` 里 `response` 非空的条目数比上一轮多，就说明新增了
+   * 一个已完成回合（正在跑的回合 response 是空串）。完成时刻取 `lastPromptAt`
+   * ——它每回合稳定、且随回合递增，正好可以当"确认水位"；缺失时退回 `updatedAt`。
+   *
+   * 为什么不用 `updatedAt`：真机取样证明它在回合结束时**不推进**，
+   * 用它做"是否新鲜"的判据会把刚完成的回合误判成历史（这正是上一版的 bug）。
+   */
+  private advanceCompletedTurns(items: readonly DshSessionListItem[]): number | undefined {
+    let latest: number | undefined;
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      if (item === undefined || item.blank === true) continue;
+      const outline = item.projections?.values?.turnOutline ?? [];
+      const done = outline.filter(
+        (entry) => typeof entry.response === 'string' && entry.response.length > 0,
+      ).length;
+      const key = item.sessionId ?? `#${i}`;
+      const baseline = this.completedTurns.get(key);
+
+      if (baseline === undefined) {
+        this.completedTurns.set(key, done);
+        // 首轮只有轮询时捕获基线：启动前完成的回合不补亮绿灯；
+        // 启动之后新出现的会话，已完成的回合算"本次运行内完成"。
+        if (this.baselineCaptured && done > 0 && item.running !== true) {
+          latest = Math.max(latest ?? 0, this.completionAtOf(item));
+        }
+        continue;
+      }
+      if (done > baseline) {
+        if (item.running === true) continue; // 还在跑，等它落定再算完成
+        this.completedTurns.set(key, done);
+        latest = Math.max(latest ?? 0, this.completionAtOf(item));
+      }
+    }
+    this.baselineCaptured = true;
+    return latest;
+  }
+
+  /** 一次完成的"水位"：优先 lastPromptAt（每回合稳定且递增）。 */
+  private completionAtOf(item: DshSessionListItem): number {
+    const promptAt = item.projections?.values?.sessionListMetadata?.lastPromptAt;
+    if (typeof promptAt === 'number' && promptAt > 0) return promptAt;
+    if (typeof item.updatedAt === 'number' && item.updatedAt > 0) return item.updatedAt;
+    return Date.now();
+  }
+
+  /** 上报并记录"最后一次上报的状态"（SPEC-006 的禁止转移判定要用）。 */
+  private emitStatusTracked(
+    status: TaskStatus,
+    message: string,
+    at: number,
+    extra: { completionAt?: number } = {},
+  ): void {
+    this.lastEmitted = status;
+    this.emit({
+      kind: 'status',
+      status,
+      message,
+      at,
+      ...(extra.completionAt === undefined ? {} : { completionAt: extra.completionAt }),
+    });
   }
 
   /** 失败一轮：累加计数、退避；超上限转 unknown。 */
@@ -396,11 +562,20 @@ export class DshMonitor extends MonitorAdapter {
     this.failureCount += 1;
     this.lastOutcome = { ok: false, errorCode: code, at: now };
 
+    // SPEC-005：auto 模式下连不上就丢掉当前端口，下一轮重新发现。
+    // 桌面端换端口后旧端口会一直 refuse，必须尽快重新扫描，而不是死守 5 轮。
+    if (this.cfg.authority === 'auto' && this.failureCount >= 2) {
+      this.client = null;
+      this.source = undefined;
+      this.authority = undefined;
+      this.log.info('authority=auto：连续失败，下一轮重新自动发现 dsh 实例');
+    }
+
     // 认证失败要能一眼区分（PRD 惯例：401/403 单独记日志，不要和其他错误混为一谈）
     const isAuth = code === 'auth/unauthorized' || code === 'auth/forbidden';
     if (isAuth) {
       this.log.warn(
-        `dsh ${this.cfg.authority} 认证失败（${code}）—— ` +
+        `dsh ${this.authorityLabel} 认证失败（${code}）—— ` +
           (this.cfg.sshHost === undefined
             ? '若该端口是 SSH 隧道，需配置 sshHost 从远端取密钥'
             : `将尝试从 ${this.cfg.sshHost} 取密钥`),
@@ -409,7 +584,7 @@ export class DshMonitor extends MonitorAdapter {
       // 丢掉缓存，下一轮走远端兜底 —— 只做一次，避免每轮跑 SSH。
       this.invalidateCredentials();
     } else {
-      this.log.warn(`dsh ${this.cfg.authority} 轮询失败（${code}）：${message}`);
+      this.log.warn(`dsh ${this.authorityLabel} 轮询失败（${code}）：${message}`);
     }
 
     if (this.failureCount >= MAX_RESTART_ATTEMPTS) {
@@ -417,16 +592,16 @@ export class DshMonitor extends MonitorAdapter {
       if (!this.reportedUnknown) {
         this.reportedUnknown = true;
         this.log.warn(
-          `dsh ${this.cfg.authority} 连续失败 ${this.failureCount} 次（最后：${code}），判定监控源失联`,
+          `dsh ${this.authorityLabel} 连续失败 ${this.failureCount} 次（最后：${code}），判定监控源失联`,
         );
-        this.emitStatus('unknown', `连续 ${this.failureCount} 次轮询失败（${code}）`);
+        this.emitStatusTracked('unknown', `连续 ${this.failureCount} 次轮询失败（${code}）`, now);
       }
     } else if (this.failureCount > 0) {
       // 未到上限：仍然上报一次心跳，避免框架误判适配器死了
       this.emitHeartbeat();
       // 首次失败就点亮失败态，让用户尽早看到问题（而不是等 5 次）
       if (this.failureCount === 1) {
-        this.emitStatus('failed', `轮询失败（${code}）：${message}`);
+        this.emitStatusTracked('failed', `轮询失败（${code}）：${message}`, now);
       }
     }
 

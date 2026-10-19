@@ -1,150 +1,102 @@
 /**
- * AI 任务指示灯 · 标签切换桥（MV3 service worker）
+ * AI 任务指示灯 · 标签切换桥 —— SW 保活（SPEC-003，第二版尝试）
  *
  * ============================================================================
- * 【它解决什么问题】
+ * 【为什么长这样】
  * ============================================================================
- * 指示灯点一下「dsh-web」时，以前只能靠"打开这个网址"，于是每点一次就多一个
- * 标签页。想改成"切到已经开着的那个标签"，就需要能操作浏览器标签的能力：
- *   - Chrome 136 之前：靠 `--remote-debugging-port` + CDP —— 但该端口在
- *     **默认用户数据目录**下已被 Chrome 静默忽略（实测 139 直接报
- *     `DevTools remote debugging requires a non-default data directory`），
- *     只能用在专用调试实例上，碰不到你的日常浏览器；
- *   - 本扩展：`chrome.tabs.update` + `chrome.windows.update`，**不受该限制**，
- *     操作的就是你日常浏览器里的真实标签。
+ * MV3 的 service worker 会在**约 30 秒空闲后**被 Chrome 回收。旧实现只在 SW
+ * 启动那一刻跑一次轮询循环，且没有注册任何唤醒事件，于是浏览器重启或 SW 被
+ * 回收后再也不会连上指示灯 —— 现场表现就是"点一次 web 任务就多一个标签页"，
+ * 而且日志里看不出原因（用户 2026-10-19 反馈）。
  *
- * ============================================================================
- * 【怎么和指示灯通信】
- * ============================================================================
- * 指示灯在 127.0.0.1:17891 上开了个小服务，本扩展**长轮询**它：
- *   GET  /poll    挂起最多 20s，拿到 {command:{id,url}} 就立刻执行
- *   POST /result  回报 {id, ok} —— ok=false 表示"没找到该标签"，
- *                 指示灯会据此退回"新开标签"，保证点击总有实际效果
+ * 第一版尝试把长轮询搬进 offscreen 文档：自报显示 `offscreen=ok(WORKERS)`
+ * 被接受、文档也"已存在"，但**没有任何一轮心跳**，实际并没有跑起轮询。
+ * 所以改成本版更朴素的方案：
  *
- * 长轮询而不是 WebSocket：MV3 的 SW 里挂起的 `fetch` 最稳（无需 ws 依赖、
- * 无需自己实现帧协议），延迟仍是毫秒级。
- *
- * 请求都带 `x-indicator-extension: 1`（指示灯据此确认"是扩展而不是网页"）。
+ *   1. SW 自己跑长轮询（与旧行为相同，只是加上了自愈）；
+ *   2. `chrome.alarms` 每 30 秒唤醒一次（实测本机 Chrome 接受 `periodInMinutes: 0.5`），
+ *      每次唤醒都会重置 30 秒空闲计时器 —— 只要定时器被尊重，SW 就不会被回收；
+ *   3. `onStartup` / `onInstalled` 兜底，保证浏览器重启、扩展重载后能自己回来；
+ *   4. 每次唤醒都 `POST /status` 自报，主进程日志能直接看到"扩展在不在、定时器周期、
+ *      轮询在谁身上"，避免再次静默失效。
  */
 
-'use strict';
+import { startBridgeClient } from './bridge-client.js';
 
-/** 指示灯桥接地址（与主进程 src/shared/constants.ts 的 EXTENSION_BRIDGE_PORT 对齐）。 */
-const BRIDGE = 'http://127.0.0.1:17891';
+const WAKE_ALARM = 'lamp-bridge-watch';
+const BRIDGE_URL = 'http://127.0.0.1:17891';
+const STATUS_HEADERS = { 'x-indicator-extension': '1', 'content-type': 'application/json' };
 
-const HEADERS = { 'x-indicator-extension': '1' };
+/** 定时器周期：优先 30 秒（unpacked 允许小于 1 分钟），不支持则退回 1 分钟。 */
+const ALARM_PERIODS = [0.5, 1];
 
-/** 服务端单次挂起上限 20s，客户端留点余量。 */
-const POLL_TIMEOUT_MS = 25_000;
+const log = (message) => console.log('[lamp-bridge]', message);
 
-/** 指示灯没起 / 端口没开时的退避，避免 SW 里刷爆。 */
-const RETRY_MS = 2_000;
+let client = null;
+let alarmReport = '未知';
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** 带超时的 fetch（挂起的轮询不能永远不返回，否则 SW 卡死）。 */
-async function fetchWithTimeout(url, options = {}, timeoutMs = POLL_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal, cache: 'no-store' });
-  } finally {
-    clearTimeout(timer);
-  }
+function ensureClient() {
+  if (client) return;
+  client = startBridgeClient({ log: (message) => log(`[sw] ${message}`) });
+  log('轮询已启动');
 }
 
-/**
- * 把 `url` **同源**的标签切到前台。
- *
- * 【为什么按同源而不是按完整 URL 匹配】dsh 的页面会带路径/哈希
- * （`http://127.0.0.1:13080/#/session/...`），但"这一个 web 应用"就是同一个源。
- * 按源匹配才能稳定命中"那个已经开着的页面"。
- *
- * @returns {{found: boolean, tabId?: number, windowId?: number, reason?: string}}
- */
-async function activateByUrl(url) {
-  let origin;
-  try {
-    origin = new URL(url).origin;
-  } catch {
-    return { found: false, reason: 'bad url' };
-  }
-
-  // 读 tab.url 需要 "tabs" 权限（manifest 已声明）
-  const tabs = await chrome.tabs.query({});
-  const hits = tabs.filter((tab) => {
-    if (typeof tab.url !== 'string') return false;
-    try {
-      return new URL(tab.url).origin === origin;
-    } catch {
-      return false;
-    }
+/** 自报状态给指示灯（best effort，失败不影响主流程）。 */
+async function report(via, polling) {
+  const payload = JSON.stringify({
+    version: chrome.runtime.getManifest?.()?.version ?? '未知',
+    via,
+    offscreen: '未使用',
+    alarm: alarmReport,
+    polling,
   });
-  if (hits.length === 0) {
-    return { found: false, reason: 'no tab' };
-  }
-
-  // 已经在那个标签上时，只需把窗口聚焦
-  const tab = hits.find((t) => t.active === true) ?? hits[0];
-  await chrome.tabs.update(tab.id, { active: true });
-  if (typeof tab.windowId === 'number') {
-    try {
-      await chrome.windows.update(tab.windowId, { focused: true });
-    } catch {
-      /* 窗口可能刚被关掉，忽略 */
-    }
-  }
-  return { found: true, tabId: tab.id, windowId: tab.windowId };
-}
-
-/** 回报执行结果（主进程没在听就算了，不影响下次轮询）。 */
-async function reportResult(id, ok, detail) {
   try {
-    await fetchWithTimeout(
-      `${BRIDGE}/result`,
-      {
-        method: 'POST',
-        headers: { ...HEADERS, 'content-type': 'application/json' },
-        body: JSON.stringify({ id, ok, detail }),
-      },
-      5_000,
-    );
+    await fetch(`${BRIDGE_URL}/status`, {
+      method: 'POST',
+      headers: STATUS_HEADERS,
+      body: payload,
+      cache: 'no-store',
+    });
   } catch {
-    /* ignore */
+    /* 指示灯没起/端口没开就算了，下一次唤醒再报 */
   }
 }
 
-/** 主循环：轮询 -> 执行 -> 回报 -> 再轮询。 */
-async function loop() {
-  for (;;) {
+async function ensureAlarm() {
+  for (const periodInMinutes of ALARM_PERIODS) {
     try {
-      const res = await fetchWithTimeout(`${BRIDGE}/poll`, { headers: HEADERS });
-      if (!res.ok) {
-        await sleep(RETRY_MS);
-        continue;
-      }
-      const data = await res.json().catch(() => null);
-      const cmd = data && data.command;
-      if (!cmd || typeof cmd.id !== 'string' || typeof cmd.url !== 'string') {
-        continue; // 20s 超时后的空轮询，立刻再排队
-      }
-
-      let result;
-      try {
-        result = await activateByUrl(cmd.url);
-      } catch (err) {
-        result = { found: false, reason: String(err) };
-      }
-      await reportResult(cmd.id, result.found === true, result);
-    } catch {
-      // 指示灯没起 / 端口没开：退避后重试
-      await sleep(RETRY_MS);
+      await chrome.alarms.create(WAKE_ALARM, { periodInMinutes });
+      const actual = await chrome.alarms.get?.(WAKE_ALARM);
+      alarmReport = actual?.periodInMinutes ? `${actual.periodInMinutes}min` : `${periodInMinutes}min(请求)`;
+      return;
+    } catch (err) {
+      log(`告警定时器创建失败（${periodInMinutes}min）：${err instanceof Error ? err.message : err}`);
     }
   }
+  alarmReport = 'fail';
 }
 
-// SW 生命周期内只跑一个循环（SW 被回收后重进时再起一个）
-if (globalThis.__lampTabBridgeRunning !== true) {
-  globalThis.__lampTabBridgeRunning = true;
-  loop();
+async function ensureAlive(via) {
+  try {
+    await ensureAlarm();
+    ensureClient();
+    await report(via, 'sw');
+  } catch (err) {
+    const text = err instanceof Error ? err.message : String(err);
+    log(`保活流程异常：${text}`);
+    ensureClient();
+    await report(via, 'sw(异常)');
+  }
 }
+
+chrome.runtime.onStartup.addListener(() => {
+  void ensureAlive('startup');
+});
+chrome.runtime.onInstalled.addListener(() => {
+  void ensureAlive('installed');
+});
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm?.name === WAKE_ALARM) void ensureAlive('alarm');
+});
+
+void ensureAlive('worker-start');

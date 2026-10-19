@@ -26,7 +26,9 @@ tasks:
     enabled: true
     monitor:
       type: dsh
-      authority: 127.0.0.1:19387
+      # SPEC-005：桌面端 dsh 每次启动都会换端口，推荐写 auto（自动发现本机可认证实例）。
+      # 需要钉死某个实例（例如调试固定端口）时再写具体 host:port。
+      authority: auto
       intervalMs: 5000
       timeoutMs: 8000
       heartbeatTimeoutMs: 120000

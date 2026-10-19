@@ -126,3 +126,54 @@ describe('确认水位的记录时机', () => {
     expect(store.getTask('a')?.status).toBe('success');
   });
 });
+
+// ---------------------------------------------------------------------------
+// SPEC-007：dismiss_after 自动熄灭不能让同一个完成重新点亮
+// ---------------------------------------------------------------------------
+// 现场：WorkBuddy 明明没在跑东西，灯每隔一段时间自己亮绿。
+// 根因：success 在 dismissAfterMs（默认 10 分钟）后自动回 idle，但**没有**
+// 把这次完成记进 ackedCompletionAt；轮询型监控下一轮又从库里读到同一个
+// lastDoneAt > 0 = 0，于是再次上报 success —— 每 10 分钟循环一次。
+describe('SPEC-007 自动熄灭（dismiss_after）要同时确认完成水位', () => {
+  const makeStore = (ref: { t: number }) => new TaskStore([task('a')], { now: () => ref.t });
+
+  it('AC-01 dismiss 之后状态回 idle，且同一个完成不再复亮', () => {
+    const ref = { t: DONE1 + 1_000 };
+    const store = makeStore(ref);
+    expect(reportDone(store, 'a', DONE1)).not.toBeNull();
+
+    ref.t += 11 * 60_000; // 超过默认 dismissAfterMs（10 分钟）
+    const changes = store.tick();
+    expect(changes.some((c) => c.taskId === 'a' && c.to === 'idle')).toBe(true);
+    expect(store.getTask('a')?.status).toBe('idle');
+    expect(store.getTask('a')?.ackedCompletionAt).toBe(DONE1);
+
+    // 监控下一轮照样会上报同一个完成 —— 必须被确认闸门丢掉
+    expect(reportDone(store, 'a', DONE1)).toBeNull();
+    expect(store.getTask('a')?.status).toBe('idle');
+  });
+
+  it('AC-02 dismiss 之后**新的**完成仍然会点亮（没有把功能砍掉）', () => {
+    const ref = { t: DONE1 + 1_000 };
+    const store = makeStore(ref);
+    reportDone(store, 'a', DONE1);
+
+    ref.t += 11 * 60_000;
+    store.tick();
+    expect(store.getTask('a')?.status).toBe('idle');
+
+    expect(reportDone(store, 'a', DONE2)).not.toBeNull();
+    expect(store.getTask('a')?.status).toBe('success');
+  });
+
+  it('AC-03 用户主动点击与自动熄灭的效果一致（都不会复亮）', () => {
+    const ref = { t: DONE1 + 1_000 };
+    const store = makeStore(ref);
+    reportDone(store, 'a', DONE1);
+    store.markRead('a');
+    expect(reportDone(store, 'a', DONE1)).toBeNull();
+
+    expect(reportDone(store, 'a', DONE2)).not.toBeNull();
+    expect(store.getTask('a')?.status).toBe('success');
+  });
+});

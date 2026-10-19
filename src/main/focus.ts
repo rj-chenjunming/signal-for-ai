@@ -248,6 +248,14 @@ export interface FocusServiceOptions {
   /** 浏览器扩展桥接（可选；没装扩展时没有任何影响）。 */
   extensionActivator?: ExtensionActivator;
   /**
+   * 需要让用户**看得见**的一次性提示（浮窗 toast）。
+   *
+   * 为什么需要：点一下 URL 型任务却"多出一个标签页"时，用户不知道是
+   * 扩展没连上还是自己点错了；只写日志等于没有反馈。
+   * 缺省不传 = 只记日志，既有调用方行为不变。
+   */
+  notify?: (message: string) => void;
+  /**
    * 取当前任务配置 —— 用于收集「配置里显式指定的 windowTitle」。
    *
    * 这些标题是用户明确要求按标题匹配的目标，窗口枚举时必须放行；
@@ -264,6 +272,8 @@ export class FocusService {
   private readonly focusTimeoutMs: number;
   private readonly fetchJson: JsonFetcher;
   private readonly extensionActivator: ExtensionActivator | undefined;
+  /** 可见提示回调（缺省 undefined = 只记日志）。 */
+  private readonly notify: ((message: string) => void) | undefined;
   private readonly options: FocusServiceOptions;
 
   /**
@@ -286,6 +296,7 @@ export class FocusService {
     this.focusTimeoutMs = options.focusTimeoutMs ?? SPAWN_TIMEOUT_MS;
     this.fetchJson = options.fetchJson ?? realJsonFetcher;
     this.extensionActivator = options.extensionActivator;
+    this.notify = options.notify;
     this.options = options;
   }
 
@@ -547,6 +558,20 @@ export class FocusService {
           };
         }
         this.logger.info('浏览器扩展未确认切换（可能没找到该标签），退回 CDP/标题匹配/新开');
+        // SPEC-003/AC-03：扩展在线但没找到标签时，"新开一个"同样会让人困惑，
+        // 必须给一次可见提示；只写日志用户看不见。
+        this.notify?.(`浏览器扩展没找到 ${jump.openUrl} 已打开的标签，已新开页面`);
+      } else if (jump.openUrlViaExtension === true) {
+        // SPEC-003/AC-01：期望走扩展但扩展没在轮询（没装/没启用/SW 被回收）。
+        // 行为仍坚持"URL 总是要打开"，但不能再静默 —— 用户现场就是被这条
+        // 静默降级坑到："我点一下它就多一个标签页，看不出为什么"。
+        this.logger.warn(
+          `任务 ${task.id}: 浏览器扩展未连接（未安装/未启用/SW 被回收），` +
+            `URL 型跳转退回"新开页面"：${jump.openUrl}`,
+        );
+        this.notify?.(
+          '浏览器扩展未连接，已新开页面；在 chrome://extensions 重载「AI 任务指示灯 · 标签切换桥」可切回已有标签',
+        );
       }
 
       // ② CDP 精确切标签（若配置了 debug 端口）。

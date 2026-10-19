@@ -48,6 +48,14 @@ import type { SqliteMonitorConfig } from '../../shared/types';
 const DEFAULT_MAX_FAILURES = 3;
 /** 视为"仍在活动"的静默窗口。 */
 const DEFAULT_ACTIVE_WITHIN_MS = 120_000;
+
+/**
+ * 启动宽限期（SPEC-007/AC-04）：监控启动前这么久以内完成的，仍算"刚完成"要提醒。
+ *
+ * 与 store 的 `dismissAfterMs`（默认 10 分钟）对齐：已经展示过一轮完成就不再补亮，
+ * 更早的历史完成一律不亮，避免重启后凭空亮一次绿。
+ */
+export const COMPLETION_STARTUP_GRACE_MS = 600_000;
 /** 子进程单次查询超时。 */
 const QUERY_TIMEOUT_MS = 15_000;
 
@@ -127,6 +135,14 @@ export function deriveSqliteVerdict(
   row: SqliteProbeRow,
   processAlive: boolean | undefined,
   ackedAt: number | undefined = 0,
+  /**
+   * 启动基线（SPEC-007/AC-04）：早于它的完成不补亮绿灯。
+   *
+   * 确认水位不跨进程持久化，所以重启后 `ackedAt` 归零；若不设下限，
+   * 库里几小时前的旧 `completed` 会立刻把灯点亮（用户现场："重启后它又自己亮了"）。
+   * 调用方传 `启动时刻 - 宽限期`，于是"刚完成的"仍会提醒，陈旧的不会。
+   */
+  earliestCompletionAt = 0,
 ): SqliteVerdict & { hidden: boolean } {
   // ① 进程不在 -> 隐藏这一行（unknown 属于被隐藏的状态）
   if (processAlive === false) {
@@ -153,7 +169,8 @@ export function deriveSqliteVerdict(
   }
 
   // ③ ★ 有**未确认**的完成 -> 绿（提醒，亮到点击）
-  if (row.lastDoneAt > 0 && row.lastDoneAt > (ackedAt ?? 0)) {
+  //    `earliestCompletionAt` = 启动基线：陈旧的历史完成不补亮（SPEC-007）。
+  if (row.lastDoneAt > 0 && row.lastDoneAt > Math.max(ackedAt ?? 0, earliestCompletionAt)) {
     return {
       status: 'success',
       message: '任务已完成，点击查看',
@@ -205,6 +222,12 @@ export function buildQueryScript(
     `const withinMs = ${Number(activeWithinMs)};`,
     'const db = new DatabaseSync(dbPath, { readOnly: true });',
     'const now = Date.now();',
+    // SPEC-008：软删除的会话不参与判定。
+    //   WorkBuddy 删除会话时会刷新 updated_at，而完成水位取的是 completed 的
+    //   MAX(updated_at) —— 删一条旧会话会被误判成"刚完成一次"，凭空亮绿灯。
+    //   老版本库可能没有该列，所以先查 schema 再决定是否加过滤（向后兼容）。
+    "const cols = db.prepare('PRAGMA table_info(sessions)').all().map((c) => c.name);",
+    "const liveFilter = cols.includes('deleted_at') ? ' WHERE (deleted_at IS NULL OR deleted_at <= 0)' : '';",
     // 一次扫描出全部计数，避免多次查库
     'const row = db.prepare(',
     "  'SELECT ' +",
@@ -220,7 +243,7 @@ export function buildQueryScript(
     "    \"SUM(CASE WHEN lower(status) IN (SELECT lower(value) FROM json_each(?)) AND (? - updated_at) BETWEEN 0 AND ? THEN 1 ELSE 0 END) AS freshFailedCount, \" +",
     "    'COUNT(*) AS totalCount, ' +",
     "    'MAX(last_activity_at) AS lastActivityAt ' +",
-    "    'FROM sessions'",
+    "    'FROM sessions' + liveFilter",
     ').get(activeStatus, activeStatus, now, withinMs, completedStatus, waitingStatuses, now, withinMs, failedStatuses, now, withinMs);',
     'db.close();',
     'process.stdout.write(JSON.stringify({',
@@ -265,6 +288,8 @@ export class SqliteMonitor extends MonitorAdapter {
   private readonly cfg: SqliteMonitorConfig;
   private timer: ReturnType<typeof setInterval> | null = null;
   private inFlight = false;
+  /** 监控启动时刻（SPEC-007/AC-04 的启动基线，start() 会刷新）。 */
+  private startedAt = Date.now();
   private failureCount = 0;
   private reportedUnknown = false;
   /** 最近一次闸门结果（undefined = 未配置闸门）。 */
@@ -278,6 +303,8 @@ export class SqliteMonitor extends MonitorAdapter {
   override async start(): Promise<void> {
     if (this.isRunning || this.isDisposed) return;
     const interval = this.cfg.intervalMs ?? this.ctx.timeouts.startTimeoutMs ?? 5_000;
+    // SPEC-007/AC-04：重启/重载后重建启动基线，陈旧完成不补亮
+    this.startedAt = Date.now();
     this.setRunning(true);
 
     // 先跑一次，让灯尽快反映真实状态（而不是等一个周期）
@@ -322,7 +349,10 @@ export class SqliteMonitor extends MonitorAdapter {
 
       // 已确认水位由 store 提供（它才是"用户点过没有"的真相所在）
       const ackedAt = this.ctx.ackedCompletionAt?.() ?? 0;
-      const verdict = deriveSqliteVerdict(row, this.processAlive, ackedAt);
+      // SPEC-007/AC-04：启动基线 = 监控启动时刻 - 宽限期。
+      // 重启后 ackedAt 归零，没有这条下限就会为几小时前的旧完成亮绿灯。
+      const earliestCompletion = this.startedAt - COMPLETION_STARTUP_GRACE_MS;
+      const verdict = deriveSqliteVerdict(row, this.processAlive, ackedAt, earliestCompletion);
       // 关掉完成提醒时，把 success 降级成 idle（完成后直接回灰，不亮绿灯）
       const muted = this.cfg.notifyOnDone === false && verdict.status === 'success';
       if (verdict.hidden) {

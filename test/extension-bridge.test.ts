@@ -242,3 +242,74 @@ describe('ExtensionBridge：安全与协议边界', () => {
     bridge = null;
   });
 });
+
+describe('SPEC-003/AC-04 扩展是否连上必须可观测', () => {
+  it('首次 /poll 打一次"已连接"，连续轮询不重复刷', async () => {
+    const logs: string[] = [];
+    const port = nextPort++;
+    const b = new ExtensionBridge({
+      info: (message: string): void => {
+        logs.push(message);
+      },
+      warn: (message: string): void => {
+        logs.push(`WARN ${message}`);
+      },
+    });
+    await b.start(port);
+    bridge = b;
+
+    // 启动时还没有扩展：此时不能谎报"已连接"
+    expect(logs.some((line) => line.includes('扩展已连接'))).toBe(false);
+
+    await pollOnce(port, 200);
+    expect(logs.filter((line) => line.includes('扩展已连接')).length).toBe(1);
+
+    // 连续轮询（间隔远小于在线判定窗口）不应反复刷同一条
+    await pollOnce(port, 200);
+    expect(logs.filter((line) => line.includes('扩展已连接')).length).toBe(1);
+  });
+
+  it('扩展可以 POST /status 自报状态：写一条可读日志，畸形 body 也不崩', async () => {
+    const logs: string[] = [];
+    const port = nextPort++;
+    const b = new ExtensionBridge({
+      info: (message: string): void => {
+        logs.push(message);
+      },
+      warn: (message: string): void => {
+        logs.push(`WARN ${message}`);
+      },
+    });
+    await b.start(port);
+    bridge = b;
+
+    const post = (body: string): Promise<number> =>
+      fetch(`http://127.0.0.1:${port}/status`, {
+        method: 'POST',
+        headers: { ...HEADERS, 'content-type': 'application/json' },
+        body,
+      }).then((res) => res.status);
+
+    expect(
+      await post(
+        JSON.stringify({
+          version: '1.1.0',
+          via: 'installed',
+          offscreen: 'ok(WORKERS)',
+          alarm: '1min',
+          polling: 'offscreen',
+        }),
+      ),
+    ).toBe(200);
+    const line = logs.find((entry) => entry.includes('扩展自报'));
+    expect(line).toBeDefined();
+    expect(line).toContain('版本=1.1.0');
+    expect(line).toContain('offscreen=ok(WORKERS)');
+    expect(line).toContain('轮询=offscreen');
+
+    // 畸形 body 不崩，且仍然记录一条（字段退化为"未知"）
+    expect(await post('{ 不是 json')).toBe(200);
+    expect(logs.filter((entry) => entry.includes('扩展自报')).length).toBe(2);
+    expect(b.isRunning).toBe(true);
+  });
+});

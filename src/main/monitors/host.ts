@@ -28,6 +28,7 @@ import { LogMonitor } from './logfile';
 import { WebhookMonitor } from './webhook';
 import { HookServer } from './hook-server';
 import { DshMonitor, LocalCredentialsSource, type SecretSource } from './dsh';
+import { discoverLocalAuthority } from './dsh-auto';
 import { DshSignalArbiter, type ExactSessionSignal } from './dsh-arbiter';
 import { SshCredentialsSource } from './dsh-remote-auth';
 import { SqliteMonitor } from './sqlite';
@@ -177,14 +178,32 @@ export class MonitorHost {
         return new CodexMonitor(ctx, task.monitor);
       case 'sqlite':
         return new SqliteMonitor(ctx, task.monitor);
-      case 'dsh':
+      case 'dsh': {
+        const secretSources = this.secretSourcesFor(task.monitor.dshHome, task.monitor.sshHost);
+        const pluginState = this.resolvePluginStateFor();
+        // 提前取出（闭包里会丢失判别联合的类型收窄）
+        const dshTimeoutMs = task.monitor.timeoutMs;
+        // SPEC-005：authority=auto 时装配自动发现（桌面端每次启动换端口）
+        const discover =
+          task.monitor.authority === 'auto'
+            ? {
+                discoverAuthority: (): Promise<string | null> =>
+                  discoverLocalAuthority({
+                    secretSources,
+                    ...(dshTimeoutMs === undefined ? {} : { timeoutMs: dshTimeoutMs }),
+                    log: this.options.logger,
+                  }),
+              }
+            : {};
         return new DshMonitor(ctx, {
-          secretSources: this.secretSourcesFor(task.monitor.dshHome, task.monitor.sshHost),
+          secretSources,
+          ...discover,
           // 精确信号优先级：仲裁器（自带 TTL/按会话归位） > 低层注入 > 无
-          ...(this.resolvePluginStateFor() === undefined
+          ...(pluginState === undefined
             ? {}
-            : { pluginStateFor: this.resolvePluginStateFor() as (id: string) => ExactSessionSignal | undefined }),
+            : { pluginStateFor: pluginState as (id: string) => ExactSessionSignal | undefined }),
         });
+      }
       default:
         return null;
     }

@@ -38,6 +38,27 @@ describe('dsh 型配置校验 —— 正常路径', () => {
     expect(warnings).toEqual([]);
   });
 
+  it('SPEC-005：authority: auto 被接受（自动发现模式）', () => {
+    const { task, warnings } = dshTaskOf(wrap('      type: dsh\n      authority: auto'));
+    expect(task).toBeDefined();
+    if (task !== undefined && isDshMonitor(task.monitor)) {
+      expect(task.monitor.authority).toBe('auto');
+    }
+    expect(warnings).toEqual([]);
+  });
+
+  it('SPEC-005：auto 大小写不敏感，且与 sshHost 同时出现时给出警告', () => {
+    const { task, warnings } = dshTaskOf(
+      wrap('      type: dsh\n      authority: AUTO\n      sshHost: "user@host"'),
+    );
+    expect(task).toBeDefined();
+    if (task !== undefined && isDshMonitor(task.monitor)) {
+      expect(task.monitor.authority).toBe('auto');
+      expect(task.monitor.sshHost).toBeUndefined();
+    }
+    expect(warnings.some((w) => w.includes('不会用 sshHost'))).toBe(true);
+  });
+
   it('完整配置：所有可选字段都被保留', () => {
     const { task, warnings } = dshTaskOf(
       wrap(

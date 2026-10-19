@@ -271,6 +271,9 @@ async function startApplication(): Promise<void> {
     // 传回调而不是快照，热重载后新配置立刻生效。
     tasks: () => configManager.config.tasks,
     extensionActivator: extensionBridge,
+    // SPEC-003：扩展不可用而退回"新开页面"时，让用户在浮窗上看见原因，
+    // 而不是只能盯着日志猜（沿用既有的一次性 toast 通道）。
+    notify: (message) => broadcastToast([overlayWindowOrNull(), null], message),
   });
   refs.focus = focus;
   // L0：启动时探测一次 wt.exe 并缓存（POC §4：本机可能没装 WT）
