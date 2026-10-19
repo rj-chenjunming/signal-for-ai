@@ -35,7 +35,7 @@ const api = window.aiIndicator;
 const lampDot = document.getElementById('lamp-dot') as HTMLDivElement;
 const lampBadge = document.getElementById('lamp-badge') as HTMLDivElement;
 const lampCore = document.getElementById('lamp-core') as HTMLDivElement;
-// 临时提示条（不是悬停 tooltip）：只用于"配置已重载"这类一次性通知。
+// 临时提示条（不是悬停 tooltip）：用于配置通知及点击失败反馈。
 // 悬停提示已按用户要求移除 —— 见下方说明。
 const lampToast = document.getElementById('lamp-toast') as HTMLDivElement;
 
@@ -273,7 +273,9 @@ function renderStripMode(snapshot: AiSnapshot): void {
       //
       // 两条动作各自独立发出（互不阻塞）
       const send = (action: 'focus_terminal' | 'mark_read'): void => {
-        void api?.sendTaskAction({ taskId: task.taskId, action }).catch(() => undefined);
+        void api?.sendTaskAction({ taskId: task.taskId, action }).then((result) => {
+          if (!result.ok) showLampToast(result.message ?? '操作未完成，请从面板重试');
+        }).catch(() => showLampToast('操作失败，请从面板查看或重试'));
       };
 
       // ⚠️ 「是否完成态」必须在**点击那一刻**读，不能捕获创建时的 task.status。
@@ -407,11 +409,13 @@ async function start(): Promise<void> {
     }, 120);
   });
 
-  api.onToast((req) => {
-    lampToast.textContent = req.message;
-    lampToast.classList.add('show');
-    window.setTimeout(() => lampToast.classList.remove('show'), 4000);
-  });
+  api.onToast((req) => showLampToast(req.message));
+}
+
+function showLampToast(message: string): void {
+  lampToast.textContent = message;
+  lampToast.classList.add('show');
+  window.setTimeout(() => lampToast.classList.remove('show'), 4000);
 }
 
 async function reportPosition(): Promise<void> {

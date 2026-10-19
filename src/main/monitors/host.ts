@@ -31,6 +31,7 @@ import { DshMonitor, LocalCredentialsSource, type SecretSource } from './dsh';
 import { DshSignalArbiter, type ExactSessionSignal } from './dsh-arbiter';
 import { SshCredentialsSource } from './dsh-remote-auth';
 import { SqliteMonitor } from './sqlite';
+import { CodexMonitor } from './codex';
 
 /** 一个任务与其适配器的绑定。 */
 interface Binding {
@@ -172,6 +173,8 @@ export class MonitorHost {
           throw new Error('HookServer 未初始化');
         }
         return new WebhookMonitor(ctx, this.hookServer);
+      case 'codex':
+        return new CodexMonitor(ctx, task.monitor);
       case 'sqlite':
         return new SqliteMonitor(ctx, task.monitor);
       case 'dsh':

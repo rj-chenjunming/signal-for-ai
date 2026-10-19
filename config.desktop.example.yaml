@@ -1,0 +1,74 @@
+# 三款本地桌面工具。复制到 config.local.yaml 后核对路径、端口、进程名。
+# 详见 docs/development/desktop-validation.md；未知来源不会伪造正常状态。
+version: 1
+app:
+  startMinimized: false
+  autoLaunch: false
+  pollIntervalMs: 3000
+  locale: zh-CN
+lamp:
+  enabled: true
+  x: -1
+  y: 60
+  alwaysOnTop: true
+  clickThrough: false
+notify:
+  popup: true
+  sound: true
+  notifyStates: [waiting, failed, success]
+  actions:
+    - id: focus_terminal
+      label: 切到工具
+
+tasks:
+  - id: dsh-local
+    name: dsh
+    enabled: true
+    monitor:
+      type: dsh
+      authority: 127.0.0.1:19387
+      intervalMs: 5000
+      timeoutMs: 8000
+      heartbeatTimeoutMs: 120000
+      # pending 只能作为近似等待；本模板不用启发式制造黄灯。
+      allowPlanPendingHeuristic: false
+    jump:
+      terminal:
+        type: windowProcess
+        processNames: ["DeepSeek Harness.exe"]
+
+  - id: workbuddy
+    name: WorkBuddy
+    enabled: true
+    monitor:
+      type: sqlite
+      # 必须改成实际 workbuddy.db 的路径；不要复制数据库快照来监控。
+      database: D:/your-appdata/.workbuddy/workbuddy.db
+      activeStatus: working
+      completedStatus: completed
+      waitingStatuses: [waiting, awaiting_approval, needs_input]
+      failedStatuses: [failed, error]
+      activeWithinMs: 120000
+      intervalMs: 5000
+      maxFailures: 3
+      notifyOnDone: true
+      requireProcess:
+        - processNames: [WorkBuddy.exe]
+    jump:
+      terminal:
+        type: windowProcess
+        processNames: [WorkBuddy.exe]
+
+  - id: codex
+    name: Codex
+    enabled: true
+    monitor:
+      type: codex
+      # 缺省读用户主目录下 .codex/sessions；自定义目录时显式设置：
+      # sessionsDir: D:/your-codex-home/sessions
+      intervalMs: 2000
+      activeWithinMs: 300000
+    jump:
+      terminal:
+        type: windowProcess
+        processNames: [Codex.exe]

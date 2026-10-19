@@ -6,7 +6,7 @@
  * 所以容错行为必须逐条锁死。
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseConfigText, expandEnvVars } from '../src/main/config';
 import { isDshMonitor } from '../src/shared/types';
 
@@ -145,6 +145,9 @@ describe('app.dshHome', () => {
 });
 
 describe('环境变量展开与 YAML 引号的交互（PRD §6.5 那类坑）', () => {
+  // 这是 Windows 路径的解析测试，夹具不能依赖开发者机器的真实用户目录。
+  beforeEach(() => vi.stubEnv('USERPROFILE', 'C:\\Users\\fixture'));
+  afterEach(() => vi.unstubAllEnvs());
   it('顺序是「先 parse YAML，再展开环境变量」—— 所以双引号写 %VAR% 是安全的', () => {
     // 关键事实（config.ts:751）：expandDeep 发生在 validateConfig 内部，
     // 也就是 parseYaml **之后**。所以 YAML 看到的是字面量 %USERPROFILE%，

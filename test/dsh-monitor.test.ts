@@ -17,7 +17,8 @@
 import { describe, expect, it, beforeAll, afterAll, afterEach } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { createServer } from 'node:http';
-import { homedir } from 'node:os';
+import { tmpdir } from 'node:os';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 
@@ -593,28 +594,34 @@ describe('LocalCredentialsSource', () => {
     // 本机文件**读得到**（32 字节合法），只是**服务端不认**（401）。
     // 于是 invalidate() 清缓存后，下一轮又把同一把本机密钥读回来，
     // 永远走不到远端 —— 表现为「日志说将尝试 SSH，但永远不尝试」。
-    const realDshHome = join(homedir(), '.dsh');
-    let remoteFetches = 0;
-    const source = new LocalCredentialsSource(realDshHome, async () => {
-      remoteFetches += 1;
-      return Buffer.from('remote-secret-32-bytes-padding!!', 'utf8');
-    });
+    const realDshHome = mkdtempSync(join(tmpdir(), 'indicator-dsh-auth-'));
+    writeFileSync(join(realDshHome, '.credentials.yaml'),
+      `records:\n  client-connection/browser-session:\n    payload:\n      secret: ${SECRET.toString('base64url')}\n`);
+    try {
+      let remoteFetches = 0;
+      const source = new LocalCredentialsSource(realDshHome, async () => {
+        remoteFetches += 1;
+        return Buffer.from('remote-secret-32-bytes-padding!!', 'utf8');
+      });
 
-    const first = await source.get('127.0.0.1:13080');
-    expect(first.byteLength).toBe(32);
-    expect(remoteFetches).toBe(0); // 第一次给本机密钥（零开销）
+      const first = await source.get('127.0.0.1:13080');
+      expect(first.byteLength).toBe(32);
+      expect(remoteFetches).toBe(0); // 第一次给本机密钥（零开销）
 
-    // 服务端回 401 -> 适配器调用 invalidate()
-    source.invalidate();
+      // 服务端回 401 -> 适配器调用 invalidate()
+      source.invalidate();
 
-    const second = await source.get('127.0.0.1:13080');
-    expect(remoteFetches).toBe(1); // ← 关键断言：这一次必须换密钥
-    expect(second.toString('utf8')).toContain('remote-secret');
+      const second = await source.get('127.0.0.1:13080');
+      expect(remoteFetches).toBe(1); // ← 关键断言：这一次必须换密钥
+      expect(second.toString('utf8')).toContain('remote-secret');
 
-    // 之后持续使用远端密钥，不再重复取
-    await source.get('127.0.0.1:13080');
-    await source.get('127.0.0.1:13080');
-    expect(remoteFetches).toBe(1);
+      // 之后持续使用远端密钥，不再重复取
+      await source.get('127.0.0.1:13080');
+      await source.get('127.0.0.1:13080');
+      expect(remoteFetches).toBe(1);
+    } finally {
+      rmSync(realDshHome, { recursive: true, force: true });
+    }
   });
 
   it('本机无该文件且未配远端兜底时，保持原行为（抛错，不静默）', async () => {

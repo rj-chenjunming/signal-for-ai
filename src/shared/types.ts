@@ -23,7 +23,7 @@ export type TaskStatus =
   | 'unknown';
 
 /** 三类监控方式（PRD P0-8 / P0-9 / P1-1）。 */
-export type MonitorType = 'process' | 'log' | 'webhook';
+export type MonitorType = MonitorConfig['type'];
 
 /** 七态全集，遍历/校验用。 */
 export const ALL_TASK_STATUSES: readonly TaskStatus[] = [
@@ -179,6 +179,11 @@ export interface DshMonitorConfig extends MonitorConfigBase {
 
 export interface SqliteMonitorConfig extends MonitorConfigBase {
   type: 'sqlite';
+  /** 只把明确完成值计入完成水位，不能将任意非 active 状态判成成功。 */
+  completedStatus?: string;
+  /** 可覆盖数据源中的等待/失败状态名称；空数组禁用该类映射。 */
+  waitingStatuses?: string[];
+  failedStatuses?: string[];
   /**
    * 要查询的 SQLite 数据库文件（绝对路径）。
    *
@@ -223,12 +228,21 @@ export interface SqliteMonitorConfig extends MonitorConfigBase {
   maxFailures?: number;
 }
 
+/** Codex 桌面/CLI 本地 rollout 的只读事件监控；不读取认证文件。 */
+export interface CodexMonitorConfig extends MonitorConfigBase {
+  type: 'codex';
+  sessionsDir?: string;
+  intervalMs?: number;
+  activeWithinMs?: number;
+}
+
 export type MonitorConfig =
   | ProcessMonitorConfig
   | LogMonitorConfig
   | WebhookMonitorConfig
   | DshMonitorConfig
-  | SqliteMonitorConfig;
+  | SqliteMonitorConfig
+  | CodexMonitorConfig;
 
 /** 依据 `type` 字段做类型收窄的运行时分派器。 */
 export function isProcessMonitor(cfg: MonitorConfig): cfg is ProcessMonitorConfig {
@@ -262,6 +276,7 @@ export function isSqliteMonitor(cfg: MonitorConfig): cfg is SqliteMonitorConfig 
  * - none：不跳终端
  */
 export type TerminalJump =
+  | { type: 'windowProcess'; processNames: string[]; titleContains?: string }
   | {
       type: 'windowTitle';
       match: string;

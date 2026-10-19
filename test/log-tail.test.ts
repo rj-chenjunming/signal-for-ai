@@ -200,6 +200,17 @@ describe('globFiles 递归匹配（零依赖实现）', () => {
     expect(found).toEqual(['a.log']);
   });
 
+  it('SPEC-002/AC-02 绝对文件路径保留根目录', () => {
+    const file = path.join(dir, 'root.log');
+    expect(globFiles(file)).toEqual([file]);
+  });
+
+  it('SPEC-002/AC-02 相对目录仍按工作目录解析', () => {
+    const relative = path.relative(process.cwd(), dir);
+    expect(globFiles(path.join(relative, '*.log')).map((p) => path.resolve(p)))
+      .toEqual([path.join(dir, 'root.log')]);
+  });
+
   it('不存在的根目录返回空数组而不抛异常', () => {
     expect(globFiles(path.join(dir, 'nonexistent', '*.log'))).toEqual([]);
   });

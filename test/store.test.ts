@@ -64,8 +64,9 @@ describe('状态转移表', () => {
     expect(canTransition('idle', 'failed')).toBe(true);
   });
 
-  it('success 不能直接跳到 running 之外的非 starting 态', () => {
-    expect(canTransition('success', 'running')).toBe(false);
+  it('SPEC-002：success 后可直接观察到新一轮 running/waiting', () => {
+    expect(canTransition('success', 'running')).toBe(true);
+    expect(canTransition('success', 'waiting')).toBe(true);
   });
 
   it('unknown 可恢复到 running/failed/idle/starting（心跳回来即恢复）', () => {

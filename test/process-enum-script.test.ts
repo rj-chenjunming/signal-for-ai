@@ -100,7 +100,8 @@ describe('buildCimScript —— 生成的脚本必须是 PowerShell 能解析的
     expect(open).toBeGreaterThanOrEqual(2); // while 一个 + try 一个
   });
 
-  it('★ 真正拿 powershell.exe 解析一遍（语法断言，不是文本匹配）', async () => {
+  // 保留 Windows 必跑；Linux 没有 Windows PowerShell，不能用 mock 冒充真测。
+  it.skipIf(process.platform !== 'win32')('★ 真正拿 powershell.exe 解析一遍（语法断言，不是文本匹配）', async () => {
     // 【为什么需要这条】上面那些都是文本级断言，只能防"已知的两种写法"。
     // 直接让 PowerShell 解析一次才是权威结论。
     //

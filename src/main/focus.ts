@@ -13,10 +13,10 @@
  *    → 标题只能作**最后兜底**，主判定依据是窗口类名/进程名。
  * 3. **进程创建有固定开销**（POC §6：沙箱实测 >2s；powershell 比 cmd 慢 ~1482ms）
  *    → 优先直接 spawn 目标程序（explorer/notepad/wt），powershell 只作最后手段，
- *      且**异步 fire-and-forget 不阻塞 UI**。
+ *      且异步执行不阻塞 UI；SPEC-002 要求等待激活确认再返回结果。
  * 4. **SetForegroundWindow 受 foreground lock 限制**（POC §5）
  *    → 降级链：ShowWindow(SW_RESTORE) → AppActivate → 打开目录/日志。
- *      focus 模块**不依赖前台窗口查询**，对已知 HWND 盲操作。
+ *      SPEC-002 通过前台 HWND 确认结果，不能确认时报告失败或明确降级。
  * 5. **不存在 0 像素 / -1 的 PID 或 HWND 哨兵**
  *    → 本模块定义 `INVALID_HANDLE = 0` 并**显式校验**；
  *      注意 0 号 HWND 是有效的桌面窗口，不是哨兵，所以本模块不用它做「无效」判定，
@@ -30,9 +30,9 @@
  *        wt.exe -w <windowName> new-tab -d <cwd>   复用已有 WT 窗口
  *        wt.exe -d <cwd>                          无窗口则新建
  *        [若 wt.exe 不存在则跳过 L1]
- *   L2 窗口级聚焦（异步 fire-and-forget，5s 超时）
+ *   L2 显式窗口级聚焦（异步等待确认，每次系统调用有超时）
  *        盲操作：ShowWindow(SW_RESTORE) → BringWindowToTop → SetForegroundWindow
- *        备选：powershell + WScript.Shell.AppActivate '<title>'（更轻，纯 COM，无需编译）
+ *        备选：按 PID AppActivate，再检查前台 HWND
  *   L3 目录兜底：spawn explorer.exe <cwd>   ← 实测 100% 可靠，终点保证
  *   L4 日志兜底：spawn notepad.exe <logFile>（显式指定，不用系统关联）
  *   ↓ 全失败
@@ -272,7 +272,7 @@ export class FocusService {
    */
   private wtAvailable: boolean | null = null;
 
-  /** 已知的终端窗口信息（由 enumerateTerminalWindows 填充），供 L2 盲操作。 */
+  /** 已知的终端窗口信息（由 enumerateTerminalWindows 填充），供 L2 显式匹配。 */
   private knownWindows: TerminalWindow[] = [];
 
   constructor(options: FocusServiceOptions = {}) {
@@ -369,8 +369,12 @@ export class FocusService {
       // 这条白名单不该拦它。枚举全部窗口不会有害，因为匹配仍由
       // `findWindowByTitle` 按标题做。
       const accepted = this.acceptedTitlePatterns();
+      const processes = (this.options.tasks?.() ?? []).flatMap((task) => {
+        const terminal = task.jump?.terminal;
+        return terminal?.type === 'windowProcess' ? terminal.processNames : [];
+      });
       this.knownWindows = list
-        .map((item) => toTerminalWindow(item, accepted))
+        .map((item) => toTerminalWindow(item, accepted, processes))
         .filter((w): w is TerminalWindow => w !== null);
       this.logger.info(`已枚举 ${this.knownWindows.length} 个候选窗口`);
       return this.knownWindows;
@@ -588,8 +592,7 @@ export class FocusService {
           existing = this.findWindowByTitle(jump.openUrlTitleMatch);
         }
 
-        if (existing !== null) {
-          void this.focusExistingWindow(existing);
+        if (existing !== null && await this.focusExistingWindow(existing)) {
           this.logger.info(
             `页面已开着，切到前台「${existing.title || existing.processName}」（任务 ${task.id}，未新开标签页）`,
           );
@@ -645,7 +648,7 @@ export class FocusService {
     }
 
     // L1-b：Windows Terminal 窗口级复用（仅当探测到 wt.exe 存在）
-    if (this.wtAvailable && cwd) {
+    if (this.wtAvailable && cwd && terminal?.type !== 'windowTitle' && terminal?.type !== 'windowProcess' && terminal?.type !== 'none') {
       const ok = this.spawner.spawn('wt.exe', ['-d', cwd], SPAWN_TIMEOUT_MS);
       if (ok) {
         return {
@@ -659,66 +662,27 @@ export class FocusService {
       this.logger.info('L1 跳过：wt.exe 不存在（POC 实测本机未安装 WT）');
     }
 
-    /* ---------------- L2：窗口级聚焦（异步 fire-and-forget） ---------------- */
-    // POC §5：采用降级链 ShowWindow(SW_RESTORE) → AppActivate，**不查询前台窗口**，
-    // 对已知 HWND 盲操作。POC §6：powershell 慢，必须异步不阻塞。
-    if (terminal?.type === 'windowTitle') {
-      // 传上可选的进程名过滤：标题里含同一个品牌名时（例：dsh 原生客户端
-      // 与 Chrome 里打开的 dsh 页面都含 "DeepSeek Harness"），
-      // 只有它能保证切到**原生客户端**而不是浏览器。
-      let win = this.findWindowByTitle(terminal.match, terminal.processNames);
-
-      // ★ 未命中就先刷新一次窗口列表再试。
-      //
-      // 窗口列表是**启动时**枚举的快照。若目标程序是在灯启动**之后**才打开的
-      // （很常见：先开灯、再开 dsh 客户端），快照里根本没有它 ——
-      // 于是每一次点击都会找不到、一路降级到"打开目录"甚至失败。
-      // 实测踩到过这条：客户端明明开着，却报"未找到匹配窗口"。
-      //
-      // 快路径（窗口已在快照里）不受影响，仍是零额外开销。
+    /* ---------------- L2：显式桌面目标，等待激活确认 ---------------- */
+    if (terminal?.type === 'windowTitle' || terminal?.type === 'windowProcess') {
+      const title = terminal.type === 'windowTitle' ? terminal.match : terminal.titleContains ?? '';
+      let win = this.findWindowByTitle(title, terminal.processNames);
       if (win === null) {
         await this.refreshWindows();
-        win = this.findWindowByTitle(terminal.match, terminal.processNames);
+        win = this.findWindowByTitle(title, terminal.processNames);
       }
-
-      if (win) {
-        // fire-and-forget：不等它完成，先返回；失败也只记日志
-        void this.focusExistingWindow(win);
-        return {
-          ok: true,
-          level: FOCUS_LEVELS.WINDOW_FOCUS,
-          detail: `已请求聚焦窗口「${win.title || win.processName}」（${FOCUS_LEVELS.WINDOW_FOCUS}，异步）`,
-        };
+      let activated = win !== null && await this.focusExistingWindow(win);
+      if (win !== null && !activated) {
+        const oldHwnd = win.hwnd;
+        await this.refreshWindows();
+        win = this.findWindowByTitle(title, terminal.processNames);
+        if (win !== null && win.hwnd !== oldHwnd) activated = await this.focusExistingWindow(win);
       }
-      this.logger.warn(
-        `L2 未找到标题匹配「${terminal.match}」的窗口；` +
-          '注意 POC 实测窗口标题存在重名歧义，标题匹配仅作兜底',
-      );
+      if (activated && win !== null) {
+        return { ok: true, level: FOCUS_LEVELS.WINDOW_FOCUS, detail: `已切到窗口「${win.title || win.processName}」` };
+      }
+      this.logger.warn(`桌面目标未找到或激活未确认：${title || terminal.processNames?.join(', ')}`);
     }
-
-    // L2-b：**仅当用户没有指定窗口标题时**，才盲聚焦第一个候选窗口。
-    //
-    // ========================================================================
-    // ★★ 实测踩到的严重问题：这个兜底会"随便抢一个窗口"
-    // ========================================================================
-    // 原先这里是无条件执行的。于是当任务配了 `windowTitle` 但**目标窗口当时
-    // 不可见**（例：WorkBuddy 缩到托盘）时，标题匹配失败 → 落到这里 →
-    // **它会把第一个候选窗口（实测是 Chrome）抢到前台**。
-    //
-    // 用户看到的是："我点 workbuddy，它把我切到浏览器" —— 一个完全无关的窗口。
-    // 这比"什么都不做"糟糕得多：它会**夺走当前焦点**并且给出错误暗示。
-    //
-    // 所以：显式指定了标题却没匹配到，就**不要**再盲猜 —— 继续走 L3/L4
-    // （打开目录 / 打开日志），那些至少与任务本身相关。
-    if (terminal?.type !== 'windowTitle' && this.knownWindows.length > 0) {
-      const win = this.knownWindows[0]!;
-      void this.focusExistingWindow(win);
-      return {
-        ok: true,
-        level: FOCUS_LEVELS.WINDOW_FOCUS,
-        detail: `已请求聚焦候选终端窗口「${win.title || win.processName}」（异步）`,
-      };
-    }
+    // 没有明确目标时不盲抢第一个终端；只允许用户配置的目录/日志降级。
 
     /* ---------------- L3：目录兜底（实测 100% 可靠） ---------------- */
     if (cwd) {
@@ -758,15 +722,7 @@ export class FocusService {
     };
   }
 
-  /**
-   * 盲聚焦一个已存在窗口（异步，不阻塞调用方）。
-   *
-   * POC §5 的标准序列：
-   *   ShowWindow(h, SW_RESTORE) → BringWindowToTop(h) → SetForegroundWindow(h)
-   * 但本项目**不写 P/Invoke**（需 C++ 工具链，打包风险高），
-   * 改用 `WScript.Shell.AppActivate`（纯 COM，无需编译，POC §5 方案 c ✅ 采用）。
-   * AppActivate 内部已处理 BringWindowToTop + 最小化恢复。
-   */
+  /** 激活明确匹配的现有窗口，并通过前台 HWND 验证结果。 */
   async focusExistingWindow(win: TerminalWindow): Promise<boolean> {
     // 显式校验 HWND 有效性。INVALID_HANDLE=0 对 pid 无效；
     // 对 hwnd 而言 0 号窗口是有效的桌面窗口，故这里只排除**缺失**情况。
@@ -797,19 +753,10 @@ export class FocusService {
     // 兜底：AppActivate（纯 COM，不需要 Add-Type）。
     // 某些环境里 Add-Type 内联编译可能被安全策略拦（POC §1 记过这一条），
     // 那时仍可退到这条路。
-    if (win.title) {
-      const byTitle = await this.appActivate(win.title);
-      if (byTitle.ok) {
-        this.logger.info(`已通过 AppActivate 激活窗口「${win.title}」`);
-        return true;
-      }
-    }
-    if (win.pid !== INVALID_HANDLE) {
-      const byPid = await this.appActivate(String(win.pid));
-      if (byPid.ok) {
-        this.logger.info(`已通过 AppActivate(pid=${win.pid}) 激活窗口`);
-        return true;
-      }
+    const byPid = await this.appActivate(String(win.pid));
+    if (byPid.ok && await this.verifyForeground(win.hwnd)) {
+      this.logger.info(`已确认 AppActivate(pid=${win.pid}) 的目标窗口在前台`);
+      return true;
     }
 
     this.logger.warn(
@@ -906,6 +853,15 @@ export class FocusService {
     void titleForMatch;
   }
 
+  private async verifyForeground(hwnd: number): Promise<boolean> {
+    const script = [
+      `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class LampVerify { [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); }'`,
+      `Write-Output ('LAMPVERIFY ok=' + ([LampVerify]::GetForegroundWindow() -eq [IntPtr]${hwnd}))`,
+    ].join('\n');
+    const result = await this.spawner.exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], this.focusTimeoutMs);
+    return result.ok && /LAMPVERIFY ok=True/u.test(result.stdout);
+  }
+
   /** 执行 `WScript.Shell.AppActivate`。失败返回 ok=false，**不抛异常**。 */
   private async appActivate(target: string): Promise<{ ok: boolean; detail: string }> {
     // 目标用单引号包裹并转义内部单引号，避免命令注入。
@@ -976,6 +932,7 @@ export interface TerminalWindow {
 function toTerminalWindow(
   raw: unknown,
   acceptedTitlePatterns: readonly string[] = [],
+  acceptedProcessNames: readonly string[] = [],
 ): TerminalWindow | null {
   if (typeof raw !== 'object' || raw === null) {
     return null;
@@ -1012,7 +969,8 @@ function toTerminalWindow(
     isWindowsTerminal ||
     TERMINAL_PROCESS_NAMES.some((name) => lower === name) ||
     (hwnd !== null && TERMINAL_PROCESS_NAMES.some((name) => titleLower.includes(name))) ||
-    matchesConfiguredTitle;
+    matchesConfiguredTitle ||
+    acceptedProcessNames.some((name) => normalizeProcessName(name) === normalizeProcessName(processName));
 
   if (!looksTerminal) {
     return null;
@@ -1023,3 +981,7 @@ function toTerminalWindow(
 
 /** 导出 INVALID_HANDLE 以便测试与其它模块共用（POC 约束 7）。 */
 export { INVALID_HANDLE };
+
+function normalizeProcessName(name: string): string {
+  return name.toLowerCase().replace(/\.exe$/u, '');
+}

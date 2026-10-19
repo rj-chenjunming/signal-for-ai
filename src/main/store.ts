@@ -93,7 +93,7 @@ export const ALLOWED_TRANSITIONS: Readonly<Record<TaskStatus, readonly TaskStatu
      *
      * ⚠️ 注意**没有**顺带放开 unknown -> success：失联 ≠ 空闲。
      */
-    idle: ['starting', 'running', 'waiting', 'success', 'failed'],
+    idle: ['starting', 'running', 'waiting', 'success', 'failed', 'unknown'],
     starting: ['running', 'failed', 'unknown', 'idle'],
     running: ['waiting', 'success', 'failed', 'unknown', 'idle'],
     /**
@@ -112,7 +112,8 @@ export const ALLOWED_TRANSITIONS: Readonly<Record<TaskStatus, readonly TaskStatu
      * 仍走 running），只是补上「无需交互直接完成」这一跳。
      */
     waiting: ['running', 'success', 'failed', 'unknown', 'idle'],
-    success: ['idle', 'starting', 'failed'],
+    // 轮询/推送可直接观察到下一轮运行或等待，不保证中间有 starting。
+    success: ['idle', 'starting', 'running', 'waiting', 'failed', 'unknown'],
     /**
      * failed 允许重新回到 running / starting / waiting。
      *
@@ -392,6 +393,11 @@ export class TaskStore {
       return null;
     }
 
+    // 相同状态也是有效观测。先续心跳，再对广播去重，否则持续轮询反而会失联。
+    if (patch.isSignal !== false && !opts.isSystemEvent) {
+      task.lastSignalAt = at;
+    }
+
     const changed = to !== from;
     if (!changed && !this.hasMetaChange(task, patch)) {
       return null; // 完全无变化，不触发广播
@@ -411,21 +417,14 @@ export class TaskStore {
       if (to === 'running' && patch.startedAt !== undefined) {
         task.startedAt = patch.startedAt;
       }
-      // ★ 记住本次完成的水位（仅"当前正在提醒的完成"）。
-      // 用户点掉时用它写 ackedCompletionAt；之后同一个完成事件的上报会被
-      // 上面的确认闸门丢弃。新任务完成会带来更大的 lastCompletionAt，
-      // 于是绿灯能再次亮起。
-      if (to === 'success' && patch.completionAt !== undefined) {
-        task.lastCompletionAt = patch.completionAt;
-      }
+    }
+
+    // 完成水位独立于状态变化；连续两次完成也必须能确认最新一轮。
+    if (to === 'success' && patch.completionAt !== undefined) {
+      task.lastCompletionAt = Math.max(task.lastCompletionAt ?? 0, patch.completionAt);
     }
 
     this.applyMeta(task, patch);
-
-    // 监控信号刷新 lastSignalAt；系统事件（超时/已读/重试）不刷新，否则 stale 永远不触发。
-    if (patch.isSignal !== false && !opts.isSystemEvent) {
-      task.lastSignalAt = at;
-    }
 
     const change: StateChange = { taskId, from, to, at, mutated: true };
     this.commit([change]);
@@ -433,6 +432,7 @@ export class TaskStore {
   }
 
   private hasMetaChange(task: TaskState, patch: TaskPatch): boolean {
+    if (patch.completionAt !== undefined && patch.completionAt > (task.lastCompletionAt ?? 0)) return true;
     if (patch.message !== undefined && patch.message !== task.message) return true;
     if (patch.progress !== undefined && patch.progress !== task.progress) return true;
     if (patch.error !== undefined && patch.error !== task.error) return true;

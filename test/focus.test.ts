@@ -45,7 +45,8 @@ function makeSpawner(results: Record<string, boolean> = {}, execOut = ''): FakeS
     },
     async exec(command, args): Promise<ExecResult> {
       calls.push({ kind: 'exec', command, args });
-      return { ok: true, stdout: execOut, stderr: '', code: 0 };
+      const stdout = args.join(' ').includes('LAMPFOCUS') ? 'LAMPFOCUS ok=True' : execOut;
+      return { ok: true, stdout, stderr: '', code: 0 };
     },
   };
 }
@@ -173,7 +174,7 @@ describe('★ windowTitle 的 processNames 过滤（区分原生客户端与浏�
     expect(cmds).toContain('explorer.exe');
   });
 
-  it('没指定 windowTitle 时才允许盲聚焦候选窗口（保留原行为）', async () => {
+  it('SPEC-002：没有显式目标时不盲抢候选窗口', async () => {
     // L2-b 盲聚焦需要**真的有一个"像终端"的候选窗口**才会触发；
     // 否则 knownWindows 为空，会直接落到 L3/L4。
     const TERM = JSON.stringify([
@@ -192,7 +193,8 @@ describe('★ windowTitle 的 processNames 过滤（区分原生客户端与浏�
     // 必须先枚举：focusTerminal 自身不枚举（生产环境由启动时那次枚举填充）
     await svc.refreshWindows();
     const res = await svc.focusTerminal(TASK, { terminal: { type: 'none' } });
-    expect(res.detail).toContain('候选');
+    expect(res.ok).toBe(false);
+    expect(res.detail).not.toContain('已请求聚焦候选');
   });
 });
 

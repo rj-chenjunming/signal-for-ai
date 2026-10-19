@@ -57,12 +57,14 @@ const QUERY_TIMEOUT_MS = 15_000;
 
 /** 从数据库读出的一行汇总。 */
 export interface SqliteProbeRow {
+  readonly freshWaitingCount?: number;
+  readonly freshFailedCount?: number;
   /** `status` 等于 activeStatus 的会话数。 */
   readonly activeCount: number;
   /** 其中**最近活动时间**在窗口内的数量（最权威的那个数）。 */
   readonly freshActiveCount: number;
   /**
-   * **最近一次完成的时刻**（非 activeStatus 会话里最大的 `updated_at`），0 表示没有。
+   * **最近一次完成的时刻**（明确 completedStatus 会话里最大的 `updated_at`），0 表示没有。
    *
    * 这是一个**单调递增的水位**：每次有会话真正跑完它都会变大。
    * 用它而不是"时间窗口内的完成数"，是为了支持「亮到点击才熄」：
@@ -82,7 +84,7 @@ export interface SqliteProbeRow {
 
 /** 判定结果：状态 + 给用户看的说明。 */
 export interface SqliteVerdict {
-  readonly status: 'running' | 'success' | 'idle';
+  readonly status: 'running' | 'success' | 'idle' | 'waiting' | 'failed';
   readonly message: string;
   /**
    * 本次上报对应的**完成时刻**（仅 status==='success' 时有意义）。
@@ -129,6 +131,13 @@ export function deriveSqliteVerdict(
   // ① 进程不在 -> 隐藏这一行（unknown 属于被隐藏的状态）
   if (processAlive === false) {
     return { status: 'idle', message: '进程不在', hidden: true };
+  }
+
+  if ((row.freshFailedCount ?? 0) > 0) {
+    return { status: 'failed', message: `${row.freshFailedCount} 个任务失败`, hidden: false };
+  }
+  if ((row.freshWaitingCount ?? 0) > 0) {
+    return { status: 'waiting', message: `${row.freshWaitingCount} 个任务等待处理`, hidden: false };
   }
 
   // ② 有**新鲜**的活跃会话 -> 真的在干活
@@ -183,12 +192,16 @@ export function buildQueryScript(
   database: string,
   activeStatus: string,
   activeWithinMs: number,
+  states: Pick<SqliteMonitorConfig, 'completedStatus' | 'waitingStatuses' | 'failedStatuses'> = {},
 ): string {
   // 路径与状态值都来自配置，用 JSON.stringify 安全地嵌进 JS 字面量
   return [
     "const { DatabaseSync } = require('node:sqlite');",
     `const dbPath = ${JSON.stringify(database)};`,
     `const activeStatus = ${JSON.stringify(activeStatus)};`,
+    `const completedStatus = ${JSON.stringify(states.completedStatus ?? 'completed')};`,
+    `const waitingStatuses = ${JSON.stringify(JSON.stringify(states.waitingStatuses ?? ['waiting', 'awaiting_approval', 'needs_input']))};`,
+    `const failedStatuses = ${JSON.stringify(JSON.stringify(states.failedStatuses ?? ['failed', 'error']))};`,
     `const withinMs = ${Number(activeWithinMs)};`,
     'const db = new DatabaseSync(dbPath, { readOnly: true });',
     'const now = Date.now();',
@@ -198,19 +211,23 @@ export function buildQueryScript(
     "    \"SUM(CASE WHEN lower(status) = lower(?) THEN 1 ELSE 0 END) AS activeCount, \" +",
     "    \"SUM(CASE WHEN lower(status) = lower(?) AND last_activity_at IS NOT NULL \" +",
     "    \"AND (? - last_activity_at) <= ? THEN 1 ELSE 0 END) AS freshActiveCount, \" +",
-    // ★ 完成水位：非 activeStatus 会话里最大的 updated_at（0 表示没有）
+    // 仅明确 completed，不能把失败、取消、等待或未知枚举洗成绿灯。
     //   不设时间窗口 —— "该不该亮绿灯"由 store 的确认水位决定，
     //   时间窗口会把还等着用户点击的信号冲掉（那正是要修的行为）
-    "    \"COALESCE(MAX(CASE WHEN lower(status) <> lower(?) \" +",
+    "    \"COALESCE(MAX(CASE WHEN lower(status) = lower(?) \" +",
     "    \"THEN updated_at END), 0) AS lastDoneAt, \" +",
+    "    \"SUM(CASE WHEN lower(status) IN (SELECT lower(value) FROM json_each(?)) AND (? - updated_at) BETWEEN 0 AND ? THEN 1 ELSE 0 END) AS freshWaitingCount, \" +",
+    "    \"SUM(CASE WHEN lower(status) IN (SELECT lower(value) FROM json_each(?)) AND (? - updated_at) BETWEEN 0 AND ? THEN 1 ELSE 0 END) AS freshFailedCount, \" +",
     "    'COUNT(*) AS totalCount, ' +",
     "    'MAX(last_activity_at) AS lastActivityAt ' +",
     "    'FROM sessions'",
-    ').get(activeStatus, activeStatus, now, withinMs, activeStatus);',
+    ').get(activeStatus, activeStatus, now, withinMs, completedStatus, waitingStatuses, now, withinMs, failedStatuses, now, withinMs);',
     'db.close();',
     'process.stdout.write(JSON.stringify({',
     '  activeCount: Number(row.activeCount || 0),',
     '  freshActiveCount: Number(row.freshActiveCount || 0),',
+    '  freshWaitingCount: Number(row.freshWaitingCount || 0),',
+    '  freshFailedCount: Number(row.freshFailedCount || 0),',
     '  lastDoneAt: Number(row.lastDoneAt || 0),',
     '  totalCount: Number(row.totalCount || 0),',
     '  lastActivityAt: Number(row.lastActivityAt || 0),',
@@ -259,11 +276,13 @@ export class SqliteMonitor extends MonitorAdapter {
   }
 
   override async start(): Promise<void> {
+    if (this.isRunning || this.isDisposed) return;
     const interval = this.cfg.intervalMs ?? this.ctx.timeouts.startTimeoutMs ?? 5_000;
     this.setRunning(true);
 
     // 先跑一次，让灯尽快反映真实状态（而不是等一个周期）
     await this.safePoll();
+    if (!this.isRunning || this.isDisposed) return;
 
     this.timer = setInterval(
       this.safeRun('sqlite 轮询', () => {
@@ -284,7 +303,7 @@ export class SqliteMonitor extends MonitorAdapter {
 
   /** 单轮：查库（+ 可选闸门）-> 判定 -> 上报。任何异常都收敛成失败计数。 */
   private async safePoll(): Promise<void> {
-    if (this.isDisposed) return;
+    if (!this.isRunning || this.isDisposed) return;
     // 防叠加：上一轮还没回来就跳过（查询可能比间隔慢）
     if (this.inFlight) return;
     this.inFlight = true;
@@ -295,7 +314,9 @@ export class SqliteMonitor extends MonitorAdapter {
       }
 
       // ② 查库
+      if (!this.isRunning || this.isDisposed) return;
       const row = await this.queryDatabase();
+      if (!this.isRunning || this.isDisposed) return;
       this.failureCount = 0;
       this.reportedUnknown = false;
 
@@ -322,6 +343,7 @@ export class SqliteMonitor extends MonitorAdapter {
         this.emitStatus(verdict.status, verdict.message);
       }
     } catch (err) {
+      if (!this.isRunning || this.isDisposed) return;
       this.recordFailure(err instanceof Error ? err.message : String(err));
     } finally {
       this.inFlight = false;
@@ -358,6 +380,7 @@ export class SqliteMonitor extends MonitorAdapter {
       this.cfg.database,
       this.cfg.activeStatus ?? 'working',
       this.cfg.activeWithinMs ?? DEFAULT_ACTIVE_WITHIN_MS,
+      this.cfg,
     );
 
     return new Promise<SqliteProbeRow>((resolve, reject) => {
@@ -393,6 +416,8 @@ export class SqliteMonitor extends MonitorAdapter {
             resolve({
               activeCount: Number(parsed.activeCount ?? 0),
               freshActiveCount: Number(parsed.freshActiveCount ?? 0),
+              freshWaitingCount: Number(parsed.freshWaitingCount ?? 0),
+              freshFailedCount: Number(parsed.freshFailedCount ?? 0),
               lastDoneAt: Number(parsed.lastDoneAt ?? 0),
               totalCount: Number(parsed.totalCount ?? 0),
               lastActivityAt: Number(parsed.lastActivityAt ?? 0),
@@ -416,12 +441,11 @@ export class SqliteMonitor extends MonitorAdapter {
     if (rules.length === 0) return true;
 
     const { runCimOnce } = await import('./process-enum');
-    return new Promise<boolean>((resolve) => {
-      // 闸门失败不该让整轮崩：保守当作"在"（宁可显示灰，也不要误隐藏）
+    return new Promise<boolean>((resolve, reject) => {
+      // 无法枚举不等于进程存在；交给读取失败策略，不报告成功。
       runCimOnce(this.cfg.intervalMs ?? 5_000, (result, err) => {
         if (err !== null) {
-          this.log.warn(`进程闸门查询失败（保守视为存在）：${err.message}`);
-          resolve(true);
+          reject(new Error(`进程闸门查询失败：${err.message}`));
           return;
         }
         const alive = result.processes.some((p) => {

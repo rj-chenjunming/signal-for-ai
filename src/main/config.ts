@@ -35,6 +35,7 @@ import {
   type AppSettings,
   type ColorOverrides,
   type DshMonitorConfig,
+  type CodexMonitorConfig,
   type JumpConfig,
   type LampSettings,
   type LogMonitorConfig,
@@ -531,11 +532,24 @@ function validateMonitor(raw: unknown, taskId: string, warn: (m: string) => void
   if (type === 'log') return validateLogMonitor(raw, taskId, warn);
   if (type === 'webhook') return validateWebhookMonitor(raw, taskId, warn);
   if (type === 'dsh') return validateDshMonitor(raw, taskId, warn);
+  if (type === 'codex') return validateCodexMonitor(raw, taskId, warn);
   if (type === 'sqlite') return validateSqliteMonitor(raw, taskId, warn);
   warn(
-    `任务 ${taskId}: monitor.type 非法（${String(type)}），合法值 process/log/webhook/dsh/sqlite，已丢弃该任务`,
+    `任务 ${taskId}: monitor.type 非法（${String(type)}），合法值 process/log/webhook/dsh/sqlite/codex，已丢弃该任务`,
   );
   return null;
+}
+
+function validateCodexMonitor(raw: Record<string, unknown>, taskId: string, warn: (m: string) => void): CodexMonitorConfig {
+  const cfg: CodexMonitorConfig = { type: 'codex' };
+  if (typeof raw.sessionsDir === 'string' && raw.sessionsDir.trim()) cfg.sessionsDir = raw.sessionsDir.trim();
+  else if (raw.sessionsDir !== undefined) warn(`任务 ${taskId}: codex.sessionsDir 非法，使用默认目录`);
+  for (const key of ['intervalMs', 'activeWithinMs'] as const) {
+    const value = readPositiveInt(raw[key]);
+    if (value !== undefined) cfg[key] = Math.max(key === 'intervalMs' ? 500 : 1000, value);
+    else if (raw[key] !== undefined) warn(`任务 ${taskId}: codex.${key} 非法，使用默认值`);
+  }
+  return cfg;
 }
 
 /**
@@ -562,6 +576,11 @@ function validateSqliteMonitor(
   }
 
   const cfg: SqliteMonitorConfig = { type: 'sqlite', database };
+  if (typeof raw.completedStatus === 'string' && raw.completedStatus.trim()) cfg.completedStatus = raw.completedStatus.trim();
+  for (const key of ['waitingStatuses', 'failedStatuses'] as const) {
+    const values = readStringArray(raw[key]);
+    if (values !== undefined) cfg[key] = values;
+  }
 
   if (typeof raw.activeStatus === 'string' && raw.activeStatus.trim().length > 0) {
     cfg.activeStatus = raw.activeStatus.trim();
@@ -777,6 +796,18 @@ function validateJump(raw: unknown, taskId: string, warn: (m: string) => void): 
   if (raw.terminal !== undefined) {
     if (!isPlainObject(raw.terminal)) {
       warn(`任务 ${taskId}: jump.terminal 不是对象，已忽略（点击跳转会走 explorer 兜底）`);
+    } else if (raw.terminal.type === 'windowProcess') {
+      const names = (readStringArray(raw.terminal.processNames) ?? []).map((name) => name.trim()).filter(Boolean);
+      if (names.length === 0) {
+        warn(`任务 ${taskId}: windowProcess.processNames 必须包含进程名，已忽略定位`);
+      } else {
+        jump.terminal = {
+          type: 'windowProcess',
+          processNames: names,
+          ...(typeof raw.terminal.titleContains === 'string' && raw.terminal.titleContains.trim()
+            ? { titleContains: raw.terminal.titleContains.trim() } : {}),
+        };
+      }
     } else if (raw.terminal.type === 'windowTitle') {
       if (typeof raw.terminal.match === 'string' && raw.terminal.match.length > 0) {
         const wj: { type: 'windowTitle'; match: string; processNames?: string[] } = {
@@ -804,7 +835,7 @@ function validateJump(raw: unknown, taskId: string, warn: (m: string) => void): 
       jump.terminal = { type: 'none' };
     } else {
       warn(
-        `任务 ${taskId}: jump.terminal.type 非法（${String(raw.terminal.type)}），合法值 windowTitle/spawn/none，已忽略`,
+        `任务 ${taskId}: jump.terminal.type 非法（${String(raw.terminal.type)}），合法值 windowTitle/windowProcess/spawn/none，已忽略`,
       );
     }
   }

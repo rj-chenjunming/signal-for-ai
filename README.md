@@ -1,8 +1,10 @@
 # AI 任务状态指示灯（ai-task-indicator）
 
-Windows 桌面悬浮指示灯，用于实时监控多个 AI 工具（WorkBuddy / DeepSeek Harness / dsh 等）并行任务的执行状态。
+Windows 桌面悬浮指示灯，用于实时监控多个 AI 工具（WorkBuddy / DeepSeek Harness / Codex 等）并行任务的执行状态。
 
 托盘常驻 + 桌面置顶指示灯，七态颜色一眼可辨；任务完成或失败时弹窗 + 提示音；点击可直接跳回任务现场 —— 包括**经附带的 Chrome 扩展精确切回已打开的那个浏览器标签页**，而不是又新开一个。
+
+当前 dsh + WorkBuddy + Codex 桌面组合使用 [三工具模板](./config.desktop.example.yaml)，配置与信号边界见 [Windows 验收指南](./docs/development/desktop-validation.md)。SPEC-002 已完成云端代码验证，实际窗口切换仍需 Windows 真机验收；简单 todo 暂列后续需求。
 
 ![灯带预览](./deliverables/strip-preview.png)
 
@@ -12,13 +14,14 @@ Windows 桌面悬浮指示灯，用于实时监控多个 AI 工具（WorkBuddy /
 
 - [它解决什么问题](#它解决什么问题)
 - [快速开始](#快速开始)
-- [五种监控方式如何配置](#五种监控方式如何配置)
+- [六种监控方式如何配置](#六种监控方式如何配置)
 - [配置文件说明](#配置文件说明)
 - [状态与颜色](#状态与颜色)
 - [浮窗的两个形态（含边缘停靠）](#浮窗的两个形态含边缘停靠)
 - **⚠️ 已知限制：跳转能做到什么程度**（先读这一节）
 - [浏览器扩展：精确切回已打开的标签页](#浏览器扩展精确切回已打开的标签页)
 - [开发与打包](#开发与打包)
+- [specTDD 开发流程](#spectdd-开发流程)
 - [验证步骤](#验证步骤)
 - [设计出处](#设计出处)
 
@@ -95,9 +98,11 @@ npm run build && npm start -- --config D:/path/to/your-config.yaml
 
 ---
 
-## 五种监控方式如何配置
+## 六种监控方式如何配置
 
-配置文件的 `tasks` 数组里，每个任务用 `monitor.type` 指定监控方式：`process` / `log` / `webhook` / `dsh` / `sqlite`。
+配置文件的 `tasks` 数组里，每个任务用 `monitor.type` 指定监控方式：`process` / `log` / `webhook` / `dsh` / `sqlite` / `codex`。
+
+Codex 使用 `type: codex` 读取本地 `.codex/sessions` 的结构化 rollout 事件。支持 `sessionsDir`、`intervalMs`（默认 2000）、`activeWithinMs`（默认 300000）；不会在启动时重放历史完成，不保证读取审批等待。详细边界与完整示例见 [桌面指南](./docs/development/desktop-validation.md)。
 
 ### 方式一：process —— 监听本地进程与命令行参数
 
@@ -414,11 +419,11 @@ dsh 与 sqlite 型的完整示例见 [`config.dsh.example.yaml`](./config.dsh.ex
 ① 浏览器扩展精确切标签 → ② CDP（可选，需专用调试实例）→ ③ 按窗口标题聚焦 → ④ 新开标签页
 ```
 
-没配 `openUrl` 时（终端类任务）：
+没配 `openUrl` 时：显式 `windowProcess` / `windowTitle` 优先匹配对应窗口，跳过自动 WT。只在激活并确认前台 HWND 后报告切换成功；不盲抢其他终端。其余降级路径如下：
 
 ```
 L1  spawn 型：直接执行你配的命令（如 wt.exe new-tab -d <cwd>）   ← 首选，最可靠
-L2  窗口级聚焦：先最小化 → 恢复 → SetForegroundWindow            ← 异步，不阻塞
+L2  窗口级聚焦：先最小化 → 恢复 → SetForegroundWindow            ← 异步等待结果，不阻塞 UI
 L3  目录兜底：explorer.exe <cwd>                                 ← 实测最可靠
 L4  日志兜底：用 notepad（或你指定的程序）打开日志
 L5  全部失败：返回失败，只记日志
@@ -524,7 +529,7 @@ npm run dist           # 打包 Windows NSIS 安装包
 src/
   shared/       类型契约、IPC 契约、常量（主进程与渲染层共用）
   main/         主进程：托盘、悬浮窗、面板、状态仓库、通知、跳转
-    monitors/   三种监控器 + 规则引擎
+    monitors/   六种监控器 + 规则引擎
   preload/      contextBridge 白名单
   renderer/     悬浮灯 + 任务面板（classic script，无 import）
 test/           单元测试
@@ -533,6 +538,17 @@ docs/           PRD、架构设计、POC 报告
 ```
 
 ---
+
+## specTDD 开发流程
+
+后续迭代遵循 **规格 → 失败测试（Red）→ 最小实现（Green）→ 重构（Refactor）→ 回归与验收**。每次变更先建立可验收规格，记录验收条件与测试的对应关系，再修改行为；纯文档等例外须说明适用理由。
+
+- 从[文档入口](./docs/README.md)和[开发流程](./docs/development/spec-tdd.md)开始。
+- 用[规格模板](./docs/specs/_template.md)建立本轮规格，登记到[迭代索引](./docs/specs/README.md)。
+- 按[测试与验收规范](./docs/development/testing.md)执行；人工和 AI 同时遵循 [AGENTS.md](./AGENTS.md)。
+- 接管时的历史失败见[基线记录](./docs/development/baseline-validation.md)；本轮收敛结果与测试证据见 [SPEC-002](./docs/specs/002-three-tool-reliability.md)。Windows 桌面效果需独立验收。
+
+当前流程通过文档约定和评审执行，尚未配置自动 CI 门禁。
 
 ## 验证步骤
 
@@ -562,18 +578,18 @@ docs/           PRD、架构设计、POC 报告
 
 | 文件 | 内容 |
 |------|------|
-| **[`docs/design-decisions.md`](./docs/design-decisions.md)** | **决策台账（87 条，推荐先读这份）** —— 每条记了"发现了什么、为什么这么选、踩了什么坑" |
-| **[`docs/04-SPEC.md`](./docs/04-SPEC.md)** | **需求规格说明** —— 功能需求、状态机规格、当前状态、下一步 |
-| [`docs/05-NEXT-PROMPT.md`](./docs/05-NEXT-PROMPT.md) | 下一步开发提示词，可直接复制给 AI 执行 |
+| **[`docs/README.md`](./docs/README.md)** | **当前开发入口** —— specTDD 流程、规格索引、基线和历史资料导航 |
+| **[`docs/specs/000-baseline.md`](./docs/specs/000-baseline.md)** | **当前工程基线** —— 五类监控、关键约束、代码与测试映射 |
+| [`docs/design-decisions.md`](./docs/design-decisions.md) | 历史决策台账 —— 设计选择与踩坑记录 |
+| [`docs/04-SPEC.md`](./docs/04-SPEC.md) | 早期需求规格快照，部分状态已过时 |
+| [`docs/05-NEXT-PROMPT.md`](./docs/05-NEXT-PROMPT.md) | 按 specTDD 执行后续任务的通用提示词 |
 | [`docs/01-PRD.md`](./docs/01-PRD.md) | 产品需求、竞品选型结论、配置 schema |
 | [`docs/02-ARCHITECTURE.md`](./docs/02-ARCHITECTURE.md) | 架构设计、任务分解、类型契约 |
 | [`docs/03-POC-REPORT.md`](./docs/03-POC-REPORT.md) | Windows API 实测报告（含本 README「已知限制」的证据） |
-| [`docs/round*.md`](./docs/) | 逐轮开发记录（21 篇）：每轮修了什么真实缺陷、实测拿到了什么结论 |
+| [`docs/round*.md`](./docs/) | 历史逐轮开发记录：每轮修复与当次实测结论 |
 
-> **这些文档是一份副本。** 在本机的原始工作区里，它们的编辑位置在仓库之外（工作区根 `docs/`），
-> 同步进仓库靠 `node scripts/sync-docs.mjs` —— 它会顺带做**自动脱敏**、**台账编号校验**
-> （1..N 无缺号/重复）与**个人信息残留扫描**（有残留即非零退出）；`--check` 只比对不写文件，可挂 CI。
-> 若你只是读这个仓库，直接用仓库里这份即可。
+> **历史台账 `design-decisions.md` 与 `round*.md` 是同步副本**，原编辑位置为仓库外 `../docs`，由 `node scripts/sync-docs.mjs` 同步、脱敏和校验；普通 clone 无需运行此脚本。
+> 新 specTDD 流程、`docs/specs/` 和交接提示词直接在本仓库维护，不受该同步脚本覆盖。
 
 ## License
 
