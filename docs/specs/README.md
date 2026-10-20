@@ -5,6 +5,7 @@
 | Spec ID | 文档 | 类型 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
 | BASELINE-000 | [当前基线](000-baseline.md) | 接管现状 | observed | 从当前提交核对，不补造历史 TDD |
+| SPEC-009 | [dsh 轮询看门狗](009-dsh-poll-watchdog.md) | 修复 | verifying | 单轮挂死不静默；warn + 立即排下一轮 |
 | SPEC-008 | [软删除会话被当成完成](008-soft-deleted-sessions.md) | 修复 | verifying | SQL 排除 `deleted_at > 0`；老库无该列时兼容 |
 | SPEC-007 | [自动熄灭后重复亮绿](007-dismiss-reannounce.md) | 修复 | verifying | dismiss 同时确认水位；重启不为陈旧完成亮绿 |
 | SPEC-006 | [dsh 回合完成亮绿](006-dsh-turn-success.md) | 修复 / 能力补齐 | verifying | dsh 此前永不产生 success；现按回合完成推断 |

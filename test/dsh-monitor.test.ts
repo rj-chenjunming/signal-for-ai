@@ -872,3 +872,57 @@ describe('DshMonitor —— SPEC-006 回合完成 -> success', () => {
     await monitor.stop();
   });
 });
+// ---------------------------------------------------------------------------
+// SPEC-009：轮询看门狗 —— 单轮挂死不能把监控静默闷死
+// ---------------------------------------------------------------------------
+// 现场：2026-10-19 17:47 之后 dsh-web 的监控再无任何日志（远端密钥本该每 30
+// 分钟刷新一次），但进程与其它监控都活着 —— 只有它的 `polling=true` 被一个
+// 永不返回的 await 卡死，既不上报也不重排下一轮，灯从此不再更新。
+describe('SPEC-009 dsh 轮询看门狗', () => {
+  it('第一轮取密钥挂住 -> 看门狗强制释放，下一轮照常跑完（并留下 warn）', async () => {
+    const fake = makeFakeDsh();
+    await new Promise<void>((resolve) => fake.server.listen(0, '127.0.0.1', resolve));
+    const authority = `127.0.0.1:${(fake.server.address() as AddressInfo).port}`;
+    await fake.okSessions([sessionItem()]);
+
+    const logs: string[] = [];
+    const recording = new RecordingSink();
+    const baseCtx = makeCtx(recording.sink, { authority, intervalMs: 50, timeoutMs: 5_000 });
+    const ctx: MonitorContext = {
+      ...baseCtx,
+      logger: {
+        debug: () => undefined,
+        info: (m: string) => logs.push(`INFO ${m}`),
+        warn: (m: string) => logs.push(`WARN ${m}`),
+        error: (m: string) => logs.push(`ERROR ${m}`),
+        logError: () => undefined,
+      } as unknown as MonitorContext['logger'],
+    };
+
+    // 第一次取密钥永不返回（模拟 ssh/远端挂起），之后正常
+    let gets = 0;
+    const hangingSource = {
+      supports: () => true,
+      get: () => {
+        gets += 1;
+        return gets === 1 ? new Promise<Buffer>(() => {}) : Promise.resolve(SECRET);
+      },
+    };
+
+    const monitor = new DshMonitor(ctx, {
+      secretSources: [hangingSource],
+      pollWatchdogMs: 80,
+    });
+
+    void monitor.pollOnce(); // 永不返回
+    // 看门狗 80ms 触发；失败退避（RESTART_BACKOFF_MS[0] ≈ 1s）后才排下一轮
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+
+    expect(logs.some((l) => l.includes('看门狗'))).toBe(true);
+    expect(gets).toBeGreaterThanOrEqual(2); // 下一轮真的重新取密钥了
+    expect(recording.lastStatus()).toBe('idle'); // 下一轮真的完成了判定
+
+    await monitor.stop();
+    await new Promise<void>((resolve) => fake.server.close(() => resolve()));
+  });
+});
