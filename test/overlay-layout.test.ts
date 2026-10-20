@@ -188,11 +188,11 @@ describe('★ 回归：画布必须能容纳 CSS 内容（"圆圈显示不完整
     expect(w).toBeGreaterThanOrEqual(Math.ceil(MEASURED_CONTENT_W) + STRIP_SHADOW_PAD_X * 2);
   });
 
-  it('★ 内容高度公式与实测吻合（已计入 .strip-rows 内边距）', () => {
-    // 这条锁的是常量：它们是从实测反推的，若有人"顺手改成理论值"这里会红。
-    // 93（实测灯带高，行区无 padding）+ 12（后加的 .strip-rows 上下 padding）
-    const expected = 93 + STRIP_ROWS_PAD_Y * 2;
-    expect(Math.abs(stripContentHeight(3) - expected)).toBeLessThanOrEqual(1);
+  it('SPEC-012 内容高度容纳 32 DIP 点击区与行间距', () => {
+    const rowHeight = cssPx('.strip-row', 'height')!;
+    expect(rowHeight).toBeGreaterThanOrEqual(32);
+    const expected = STRIP_PAD_Y * 2 + STRIP_MASTER_HEIGHT + STRIP_GAP + STRIP_ROWS_PAD_Y * 2 + 3 * rowHeight + 2 * 6;
+    expect(stripContentHeight(3)).toBeGreaterThanOrEqual(expected);
   });
 
   it('★ 垂直留白必须大于「投影向下扩散的距离」', () => {
@@ -435,8 +435,8 @@ describe('compactCanvasSize —— 点阵形态尺寸', () => {
     const block = dockRuleBlock('.strip-rows');
     expect(block).not.toBe('');
     expect(/padding:\s*0/u.test(block)).toBe(true);
-    // 点阵不滚动：留着 overflow 裁剪边只会白白切掉投影
-    expect(/overflow:\s*visible/u.test(block)).toBe(true);
+    // SPEC-012: internal dots stay inside the icon tile; long tool lists must scroll.
+    expect(/overflow-y:\s*auto/u.test(block)).toBe(true);
   });
 
   it('★ 交叉校验：COMPACT_DOT / COMPACT_MASTER 与 CSS 圆点尺寸一致', () => {

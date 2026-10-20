@@ -19,6 +19,7 @@
     "test:watch": "vitest",
     "dist": "npm run build && electron-builder --win nsis",
     "smoke": "node scripts/smoke-e2e.js",
+    "check:ui": "node scripts/check-ui.mjs",
     "start:demo": "node scripts/start.mjs -- --config ./config.demo.yaml"
   },
   "dependencies": {

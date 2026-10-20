@@ -24,6 +24,8 @@ npm run build
 
 `windowProcess.processNames` 是实际主窗口进程名，大小写和 `.exe` 后缀不敏感；`titleContains` 可选，用于多个窗口中进一步缩小范围。模板值是候选，须用下方进程查询核对。它保证切到匹配应用窗口，不保证定位应用内某个线程。模板省略 `cwd`/`openUrl`，因此找不到应用时会给出失败反馈，不以打开目录冒充切换成功。
 
+SPEC-013/014：显式进程目标不存在普通主窗口时，限定到该进程查找唯一的隐藏 Electron 主窗口，排除辅助/owned/空标题和歧义候选。dsh＋DeepSeek Harness 目标通过已运行进程的真实安装程序单实例入口让 dsh 自己 show/focus，再确认前台 HWND，避免直接 ShowWindow 后 dsh 的 X 无效；未运行或身份/路径验证失败不尝试启动。2026-10-21 原生恢复前台已确认，用户确认 X 可以隐藏到后台；多轮及面板触发矩阵仍待验收，见 [SPEC-014](../specs/014-dsh-native-window-reveal.md)。
+
 ```powershell
 # 只查看顶层窗口对应的进程，不修改三个应用
 Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object Id, ProcessName, MainWindowTitle
@@ -47,7 +49,7 @@ npm start -- --config ./config.local.yaml
 - WorkBuddy 缺库/进程枚举错误按失败阈值降为 unknown；失败期间不产生新完成证据。数据库表与毫秒时间戳必须符合本机版本。启动时可能提醒数据库尚未确认的历史完成，这是既有行为；确认水位当前不跨应用重启持久化。
 - Codex 启动前的历史完成不会刷提醒。`task_started/turn_started` → 蓝，`task_complete/turn_complete` → 绿，终止错误 → failed，中止 → idle；多会话中正在运行优先。普通文字与工具级错误不用于猜任务完成。
 - SPEC-010：历史 unknown/启动前陈旧回合不再抹掉本轮明确完成；实际观测为活跃而后失联的回合仍保护为 unknown。完成后保留绿灯至点击确认或默认十分钟自动确认，随后保持灰色空闲行；新回合重新蓝灯。只看到完成而缺少真实开始证据不会洗绿。
-- Codex 审批等待不保证落到 rollout，不能承诺精确黄灯；没有新鲜结构化活动超过 `activeWithinMs`（默认 5 分钟）会转 unknown。没有看到开始、失联后只看到完成，也不能绕过状态机凭空亮绿。
+- Codex 审批等待不保证落到 rollout。可选 [官方 Hook 旁路](codex-approval-hooks.md) 配置 `approvalEventsFile`，经用户信任后，请求审批黄灯、工具返回恢复；2026-10-20 已实测一次真实审批黄→工具返回蓝，不保证点击允许瞬间恢复，也不代表完整三工具矩阵通过。未接 Hook 时，没有新鲜结构化活动超过 `activeWithinMs`（默认 5 分钟）会转 unknown。没有看到开始、失联后只看到完成，也不能绕过状态机凭空亮绿。
 - Codex 取最近修改的 32 个 `.jsonl`，每文件每轮最多读取 512 KiB（包括最多 256 字节首尾摘要样本），首次从头逐轮追平，再只读新增字节。文件很大时首次恢复状态需要多轮；新增正文跨块时保留上次可靠观测。单行最多缓存 256 KiB，超长正文跳过至换行，随后继续读取生命周期；半行只在补齐后生效。文件删除/替换/截断清理旧证据，停止清理缓存与句柄。每轮仍最多扫描 5000 个目录项/6 层，超限可缩小 `sessionsDir`。
 - 不支持 `.jsonl.zst`、归档目录或未落本地的云端会话；最近 32 文件之外的会话不被采集，Windows 的 mtime 更新可能滞后。CLI 与桌面会话目前共同聚合，未识别为仅桌面任务。关闭程序不会即时提供终止事件，运行记录会按新鲜度过期；仅凭 mtime 刷新不会清空已读取的完成状态。同长度重写用文件身份及首尾摘要发现，不保证检测只改中部且首尾完全相同的原地编辑。
 

@@ -68,6 +68,8 @@ tasks:
       type: codex
       # 缺省读用户主目录下 .codex/sessions；自定义目录时显式设置：
       # sessionsDir: D:/your-codex-home/sessions
+      # 授权黄灯可选旁路（须先安装并信任 Hook，见 docs/development/codex-approval-hooks.md）：
+      # approvalEventsFile: D:/your-repo/logs/codex-hook-events.jsonl
       intervalMs: 2000
       activeWithinMs: 300000
     jump:

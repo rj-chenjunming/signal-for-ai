@@ -18,17 +18,17 @@
  * 改 CSS 时请把这里的常量一起改，对应关系：
  *   STRIP_PAD_X / STRIP_PAD_Y  ->  .lamp-strip 的 padding: 6px 8px
  *   STRIP_GAP                  ->  .lamp-strip 的 gap: 6px
- *   MASTER_H                   ->  .strip-master-dot(16) + padding-bottom(5) + border(1)
+ *   MASTER_H                   ->  .strip-master 的 32 DIP 点击区（SPEC-012）
  *   ROWS_GAP                   ->  .strip-rows 的 gap: 5px
- *   ROW_H                      ->  .strip-dot 的 height: 14px
- *   CONTENT_W                  ->  小灯(14) + gap(6) + 最长端口标签宽度
+ *   ROW_H                      ->  .strip-dot 的 height: 8px
+ *   CONTENT_W                  ->  工具图标 + gap + 最长端口标签宽度
  *
  * @module overlay-layout
  */
 
 import type { LampDock } from '../shared/types';
 
-/** 单灯模式的正方形画布 = 灯直径 + 24（给徽标与 hover 提示留余量）。 */
+/** 单灯模式的正方形画布 = 灯直径 + 24（给徽标与阴影留余量）。 */
 export const SINGLE_LAMP_EXTRA = 24;
 
 /**
@@ -47,29 +47,15 @@ export const STRIP_PAD_Y = 6;
 /** 总灯区与端口行区之间的 gap，对应 .lamp-strip gap。 */
 export const STRIP_GAP = 6;
 /**
- * 总灯行高度（含分隔线）。
- *
- * ⚠️ 这个值是从**实测**反推的，不是纯理论计算：
- *   实测 3 行灯带自然高度 = 93px，每行步进 18px（见 STRIP_ROW_STEP），
- *   扣掉上下 padding(12) + gap(6) + 3 行(54)，得总灯区 = 21px。
- * 理论值（16 圆点 + 5 padding-bottom + 1 线 = 22）与实测差 1px ——
- * 以**实测**为准，因为 CSS 的取整行为不总是与理论一致。
+ * SPEC-012 总灯按钮高度；内部圆点仍为 16，点击区扩大为 32 DIP。
  */
-export const STRIP_MASTER_HEIGHT = 21;
+export const STRIP_MASTER_HEIGHT = 32;
 /**
- * 单个端口行的**有效高度（含行间距）**。
- *
- * ⚠️ 从实测反推，不是 .strip-dot 的 14px：
- *   实测 3 行灯带自然高度 = 93px
- *   减去固定部分（上下 padding 12 + 总灯区 23 + gap 6 = 41）= 52px
- *   52 / 3 ≈ 17.33px/行
- * 为什么比 14 大：`.strip-rows` 的 gap(5) 摊到每行，且行内文字行高、
- * flex 对齐会产生取整余量。用 18 而非 17.33 是**刻意向上取整** ——
- * 宁可每行多留 0.67px，也不能让圆点被裁（少 1px 就是切边）。
+ * SPEC-012 每行 32 DIP 点击区 + 6 DIP 间距；末行也保留间距余量。
  */
-export const STRIP_ROW_STEP = 18;
+export const STRIP_ROW_STEP = 38;
 /** 端口小灯高度，对应 .strip-dot height（仅用于逐行边界校验）。 */
-export const STRIP_ROW_HEIGHT = 14;
+export const STRIP_ROW_HEIGHT = 8;
 /**
  * `.strip-rows` 的四周内边距（CSS 里是 `padding: 6px`）。
  *
@@ -138,13 +124,15 @@ export function stripCanvasHeight(rows: number): number {
  * @param lampSize  单灯直径（来自 lamp.size 设置）
  * @param taskCount 启用的任务数；< 2 时退回单灯形态
  * @param maxHeight 高度上限（超出由 .strip-rows 自己滚动），默认 70vh
- * @param dock      停靠方向；非 none 时改用点阵形态（见下方「边缘停靠」）
+ * @param dock      停靠方向；非 none 时改用工具图标＋状态点
+ * @param maxWidth 顶部停靠的可用宽度上限；长列表由渲染层滚动
  */
 export function resolveCanvasSize(
   lampSize: number,
   taskCount: number,
   maxHeight: number,
   dock: LampDock = 'none',
+  maxWidth: number = Number.POSITIVE_INFINITY,
 ): { width: number; height: number } {
   const base = Math.max(16, Math.round(lampSize));
 
@@ -154,7 +142,8 @@ export function resolveCanvasSize(
   }
 
   if (dock !== 'none') {
-    return compactCanvasSize(taskCount, dock);
+    const size = compactCanvasSize(taskCount, dock);
+    return { width: Math.min(size.width, maxWidth), height: Math.min(size.height, maxHeight) };
   }
 
   return {
@@ -164,7 +153,7 @@ export function resolveCanvasSize(
 }
 
 /* ============================================================================
- * 边缘停靠 —— 拖到屏幕侧边/顶部时切成"点阵"形态（只要灯，不要文字）
+ * 边缘停靠 —— 工具图标＋状态点（不显示文字）
  * ==========================================================================*/
 
 /**
@@ -176,7 +165,9 @@ export function resolveCanvasSize(
 export const DOCK_THRESHOLD = 24;
 
 /** 点阵模式的圆点直径（与灯带里的小灯一致，视觉上不跳）。 */
-export const COMPACT_DOT = 14;
+export const COMPACT_DOT = 8;
+/** SPEC-012: full icon hit target, independent of the status dot diameter. */
+export const COMPACT_TILE = 32;
 /** 点阵模式里总灯（聚合态）的直径。 */
 export const COMPACT_MASTER = 16;
 /** 点阵模式的圆点间距。 */
@@ -196,7 +187,7 @@ export const COMPACT_SAFETY = 4;
 /**
  * 点阵形态的画布尺寸。
  *
- * 主轴长度 = 总灯 + 间距 + n 个圆点 + (n-1) 个圆点间距；
+ * 主轴长度 = 总灯点击区 + 间距 + n 个图标点击区 + (n-1) 个间距；
  * `top` 停靠时主轴是**水平**的（横排），左右停靠时是**垂直**的（竖排）。
  *
  * ⚠️ 这些常量必须与 `shared.css` 里 `body.dock-*` 那段保持一致。
@@ -207,12 +198,12 @@ export function compactCanvasSize(
   dock: LampDock,
 ): { width: number; height: number } {
   const n = Math.max(0, rows);
-  const taskAxis = n > 0 ? n * COMPACT_DOT + (n - 1) * COMPACT_GAP : 0;
-  const mainAxis = taskAxis > 0 ? COMPACT_MASTER + STRIP_GAP + taskAxis : COMPACT_MASTER;
+  const taskAxis = n > 0 ? n * COMPACT_TILE + (n - 1) * COMPACT_GAP : 0;
+  const mainAxis = taskAxis > 0 ? COMPACT_TILE + STRIP_GAP + taskAxis : COMPACT_TILE;
 
   const horizontal = dock === 'top';
-  const contentW = horizontal ? mainAxis : Math.max(COMPACT_MASTER, COMPACT_DOT);
-  const contentH = horizontal ? COMPACT_MASTER : mainAxis;
+  const contentW = horizontal ? mainAxis : COMPACT_TILE;
+  const contentH = horizontal ? COMPACT_TILE : mainAxis;
 
   return {
     width: contentW + COMPACT_PAD * 2 + COMPACT_SHADOW_PAD * 2,

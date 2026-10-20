@@ -22,7 +22,7 @@
         - .lamp-drag 用 -webkit-app-region: drag，由 Chromium 直接处理，零 IPC 开销
         - .lamp-core  正常响应点击，用于展开/收起面板
       -->
-      <div class="lamp-drag" title="拖动可移动位置">
+      <div class="lamp-drag">
         <!--
           两种形态二选一（设计决策 D6）：
           - 单灯模式（默认）：一个总灯，最小干扰
@@ -36,11 +36,11 @@
 
         <!-- 灯带模式容器。子节点由 overlay.js 按快照重建。 -->
         <div class="lamp-strip" id="lamp-strip" hidden>
-          <div class="strip-master">
+          <button class="strip-master" id="strip-master" aria-label="展开任务面板">
             <div class="strip-master-dot" id="strip-master-dot"></div>
             <span class="strip-master-label" id="strip-master-label">全部</span>
             <div class="lamp-badge" id="strip-master-badge" hidden>0</div>
-          </div>
+          </button>
           <div class="strip-rows" id="strip-rows"></div>
         </div>
       </div>
@@ -54,6 +54,7 @@
 
     <!-- audio.js 必须先于 overlay.js 加载：它把音效接口挂到 window.aiIndicatorAudio -->
     <script src="./audio.js"></script>
+    <script src="./ui.js"></script>
     <script src="./overlay.js"></script>
   </body>
 </html>

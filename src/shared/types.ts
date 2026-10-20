@@ -238,6 +238,8 @@ export interface SqliteMonitorConfig extends MonitorConfigBase {
 export interface CodexMonitorConfig extends MonitorConfigBase {
   type: 'codex';
   sessionsDir?: string;
+  /** Optional sanitized events written by the trusted Codex status Hook. */
+  approvalEventsFile?: string;
   intervalMs?: number;
   activeWithinMs?: number;
 }
@@ -400,6 +402,9 @@ export interface TaskConfig {
 /** 任务运行时状态（TaskStore 持有的唯一真相）。 */
 export interface TaskState {
   taskId: string;
+  /** 主进程推导的显示元数据；旧快照由渲染层兜底。 */
+  toolKind?: 'codex' | 'dsh' | 'workbuddy' | 'generic';
+  availableActions?: TaskAction[];
   name: string;
   status: TaskStatus;
   /** 最近一条信号携带的描述（webhook message / 命中的日志行摘要）。 */

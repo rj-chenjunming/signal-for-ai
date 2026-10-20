@@ -542,6 +542,8 @@ function validateMonitor(raw: unknown, taskId: string, warn: (m: string) => void
 
 function validateCodexMonitor(raw: Record<string, unknown>, taskId: string, warn: (m: string) => void): CodexMonitorConfig {
   const cfg: CodexMonitorConfig = { type: 'codex' };
+  if (typeof raw.approvalEventsFile === 'string' && raw.approvalEventsFile.trim()) cfg.approvalEventsFile = raw.approvalEventsFile.trim();
+  else if (raw.approvalEventsFile !== undefined) warn(`任务 ${taskId}: codex.approvalEventsFile 非法，未启用授权 Hook`);
   if (typeof raw.sessionsDir === 'string' && raw.sessionsDir.trim()) cfg.sessionsDir = raw.sessionsDir.trim();
   else if (raw.sessionsDir !== undefined) warn(`任务 ${taskId}: codex.sessionsDir 非法，使用默认目录`);
   for (const key of ['intervalMs', 'activeWithinMs'] as const) {

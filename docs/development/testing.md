@@ -55,6 +55,7 @@ npm test -- test/store-ack-completion.test.ts -t '用例名称'
 | Windows 桌面 | `npm run start:demo`；按 AC 操作 | 置顶、拖拽/左右及顶部停靠、DPI/多屏、通知/声音/焦点、托盘和扩展 |
 | 用户环境集成 | `scripts/sqlite-monitor-check.mjs`、`scripts/live-dsh-check.mjs` 等 | 需要授权范围内真实服务/数据库/本地配置，先阅读脚本前置；不自动连接未知主机 |
 | Windows 打包 | `npm run dist` | 仅影响打包/分发时必须做；NSIS 成功不代表安装与桌面行为已验证 |
+| Electron 渲染夹具 | 构建后 `npm run check:ui` | 隐藏窗口验证四种布局/长列表/深浅色，截图在 `logs/spec012-ui`；无真实工具 IO，不替代 OS 鼠标、托盘、DPI/多屏验收 |
 
 ## Windows 与外部服务验收记录
 

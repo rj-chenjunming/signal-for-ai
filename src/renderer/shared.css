@@ -1,22 +1,5 @@
-/**
- * 渲染层共用样式 —— 深浅色自适应（PRD §7.3：跟随 nativeTheme）。
- *
- * 【状态色的单一来源约束】（架构 §8.1）
- * 色值只允许在 shared/constants.ts 的 STATUS_COLOR 定义一次。
- * 本文件通过 CSS 变量接收主进程/JS 注入的色值（见 overlay.ts / panel.ts），
- * **不硬编码任何状态色**，避免出现「CSS 一套、常量一套」的漂移。
- *
- * 动画类名与 constants.ts 的 STATUS_ANIMATION 一一对应：
- *   anim-steady / anim-breathe-slow / anim-breathe / anim-blink-fast
- *   / anim-flash-once / anim-alarm
- */
-
-/* ============================================================================
- * 基础
- * ==========================================================================*/
-
+/* SPEC-012: geometry is paired with main/overlay-layout.ts. */
 :root {
-  /* 这些变量由 JS（overlay.ts / panel.ts）在收到快照后写入真实状态色 */
   --status-idle: #6b7280;
   --status-starting: #93c5fd;
   --status-running: #3b82f6;
@@ -24,327 +7,77 @@
   --status-success: #22c55e;
   --status-failed: #ef4444;
   --status-unknown: #4b5563;
-
-  --panel-bg: #1f2430;
-  --panel-fg: #e6e9ef;
-  --panel-muted: #9aa4b8;
-  --panel-border: #333b4d;
-  --panel-hover: #262c3b;
-
-  --lamp-size: 28px;
-  --lamp-opacity: 0.92;
-
+  --panel-bg: #141922; --panel-card: #1c2330; --panel-fg: #edf1f7;
+  --panel-muted: #a1adbf; --panel-border: #303a4b; --panel-hover: #283347;
+  --accent: #a6c7ff; --accent-bg: #293c59; --glass: rgb(24 31 43 / 93%);
+  --lamp-size: 28px; --lamp-opacity: 0.92;
   color-scheme: dark;
 }
-
-/* 浅色桌面主题：Electron 会把 prefers-color-scheme 同步过来 */
 @media (prefers-color-scheme: light) {
   :root {
-    --panel-bg: #f7f8fa;
-    --panel-fg: #1f2430;
-    --panel-muted: #5b6478;
-    --panel-border: #d8dde8;
-    --panel-hover: #eef1f6;
+    --panel-bg: #f3f5f9; --panel-card: #ffffff; --panel-fg: #202c40;
+    --panel-muted: #607087; --panel-border: #dce3ee; --panel-hover: #e9eef6;
+    --accent: #315ea4; --accent-bg: #e9f0fc; --glass: rgb(250 252 255 / 94%);
     color-scheme: light;
   }
 }
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; font-family: 'Segoe UI', 'Microsoft YaHei UI', system-ui, sans-serif; user-select: none; }
+[hidden] { display: none !important; }
+button, summary { font: inherit; color: inherit; cursor: pointer; -webkit-app-region: no-drag; }
+button { border: 0; }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+svg { display: block; width: 20px; height: 20px; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-thumb { border-radius: 4px; background: var(--panel-border); }
 
-* {
-  box-sizing: border-box;
-}
-
-html,
-body {
-  margin: 0;
-  padding: 0;
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei',
-    system-ui, sans-serif;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-/* ============================================================================
- * ★ 让 `hidden` 属性真的生效
- * ============================================================================
- * 浏览器默认样式里的 `[hidden] { display: none }` **优先级极低**，
- * 会被任何类选择器上的 `display` 覆盖。
- *
- * 本项目的 `.lamp-strip { display: flex }` 正好覆盖了它 ——
- * 于是 JS 里写 `lampStrip.hidden = true` **根本不会把它藏起来**。
- *
- * 这个缺陷一直存在，只是以前从未暴露：以往只有"≥2 个任务（显示灯带）"
- * 这一条路径，没人需要把灯带藏起来。加了「没活着的东西就缩成单灯」之后，
- * 首次出现"必须隐藏灯带"的场景，它立刻显形 ——
- * 表现为窗口已经缩成 52x52 单灯，里面却还画着一块灯带。
- *
- * 用 `!important` 是刻意的：hidden 语义必须压过任何展示样式，
- * 否则每个新组件都要重新踩一遍。
- */
-[hidden] {
-  display: none !important;
-}
-
-/* ============================================================================
- * 悬浮灯（overlay 窗口）
- * ==========================================================================*/
-
-.overlay-body {
-  width: 100vw;
-  height: 100vh;
-  overflow: hidden;
-  background: transparent;
-}
-
-.lamp-stage {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-}
-
-/* 拖拽区：-webkit-app-region 由 Chromium 直接处理，零 IPC 开销（架构 §1.3） */
-.lamp-drag {
-  -webkit-app-region: drag;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: calc(var(--lamp-size) + 16px);
-  height: calc(var(--lamp-size) + 16px);
-}
-
-/* 点击区：必须从拖拽区里挖出来，否则点击会被 drag 吃掉 */
-.lamp-core {
-  -webkit-app-region: no-drag;
-  position: relative;
-  width: var(--lamp-size);
-  height: var(--lamp-size);
-  cursor: pointer;
-}
-
-.lamp-dot {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  /* background-color 由 JS 写入真实状态色 */
-  background-color: var(--status-idle);
-  opacity: var(--lamp-opacity);
-  box-shadow: 0 0 0 1px rgb(11 18 32 / 55%), 0 2px 6px rgb(0 0 0 / 35%);
-  transition: background-color 220ms ease;
-}
-
-.lamp-core:hover .lamp-dot {
-  opacity: 1;
-}
-
-/* ===========================================================================
- * 多端口灯带（设计决策 D6 / D9）
- *
- * 布局：总灯在上（略大），下面竖排每端口一盏小灯 + 端口号标签。
- *   ◆            <- 总灯（聚合所有端口）
- *   ● 3080       <- 每端口一盏 14px 小灯
- *   ● 13080
- *
- * 为什么竖排而不是横排：端口号要跟着灯走，横排会把窗口撑得很宽、
- * 盖住编辑器更多区域；竖排整体约 76px 宽，只占屏幕右侧一条。
- *
- * 色值一律走 --status-* 变量，本文件不出现字面色值（架构 §8.1 单一来源）。
- * ===========================================================================*/
-
+/* Padding and gaps are drag regions; each button is no-drag. */
+.overlay-body { width: 100vw; height: 100vh; overflow: hidden; background: transparent; color: var(--panel-fg); }
+.lamp-stage { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.lamp-drag { -webkit-app-region: drag; display: flex; align-items: center; justify-content: center; width: calc(var(--lamp-size) + 16px); height: calc(var(--lamp-size) + 16px); }
+.lamp-core { -webkit-app-region: no-drag; position: relative; width: var(--lamp-size); height: var(--lamp-size); cursor: pointer; }
+.lamp-dot { width: 100%; height: 100%; border-radius: 50%; background: var(--status-idle); opacity: var(--lamp-opacity); box-shadow: 0 0 0 1px rgb(0 0 0 / 15%), 0 2px 6px rgb(0 0 0 / 25%); }
+body.strip-mode .lamp-drag { width: 100%; height: 100%; }
 .lamp-strip {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 6px 8px;
-  /* 半透明底板：让灯在浅色和深色桌面上都能看清 */
-  background: rgb(11 18 32 / 42%);
-  border-radius: 10px;
-  backdrop-filter: blur(2px);
+  display: flex; flex-direction: column; align-items: stretch;
+  gap: 6px; padding: 6px 8px;
+  max-height: calc(100vh - 24px); max-width: calc(100vw - 16px);
+  background: var(--glass); border-radius: 13px;
+  box-shadow: inset 0 0 0 1px var(--panel-border), 0 2px 6px rgb(0 0 0 / 16%);
 }
-
-/* 总灯：代表所有端口的聚合态，略大于端口灯 */
-.strip-master {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding-bottom: 5px;
-  margin-bottom: 1px;
-  border-bottom: 1px solid rgb(255 255 255 / 14%);
-  width: 100%;
-}
-
-.strip-master-dot {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  flex: none;
-  background-color: var(--status-idle);
-  box-shadow: 0 0 0 1px rgb(11 18 32 / 55%), 0 2px 6px rgb(0 0 0 / 35%);
-  transition: background-color 220ms ease;
-}
-
-.strip-master-label {
-  font: 600 10px/1 ui-monospace, "Cascadia Mono", Consolas, monospace;
-  color: rgb(226 232 240 / 92%);
-  letter-spacing: 0.02em;
-}
-
-/* 单个端口一行 */
-.strip-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  /*
-   * ★ 必须从拖拽区里挖出来，否则**点击会被 drag 吃掉**。
-   *
-   * `.lamp-drag` 覆盖整窗且是 `-webkit-app-region: drag`（整块当标题栏拖动窗口）。
-   * 在 drag 区域里，鼠标事件被 OS 用于拖窗，**不会派发给子元素** ——
-   * 于是行上的 click 监听永远收不到事件，表现就是"点了没反应"。
-   *
-   * `.lamp-core` 当初就是这么挖的（见上方注释），灯带行漏了这一步。
-   * 我的 verify-ack-click.mjs 之所以没抓到，是因为它用
-   * `element.click()` 派发**合成事件**，绕过了命中测试 —— 合成事件不经过
-   * app-region 判定。用真实鼠标点才会暴露。
-   *
-   * 只挖行本身、不挖 `-rows` 容器：容器上下的内边距与行间距仍属 drag 区域，
-   * 所以窗口照样能拖（拖那些空隙即可）。
-   */
-  -webkit-app-region: no-drag;
-}
-
-.strip-row:hover .strip-dot {
-  opacity: 1;
-}
-
-.strip-dot {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  flex: none;
-  /* background-color 由 JS 按状态写入 */
-  background-color: var(--status-idle);
-  opacity: var(--lamp-opacity);
-  box-shadow: 0 0 0 1px rgb(11 18 32 / 55%), 0 1px 4px rgb(0 0 0 / 32%);
-  transition: background-color 220ms ease;
-}
-
-.strip-port {
-  font: 500 10px/1 ui-monospace, "Cascadia Mono", Consolas, monospace;
-  color: rgb(203 213 225 / 88%);
-  white-space: nowrap;
-  /* 端口名过长时省略，而不是把窗口撑宽（窗口宽度由 overlay.ts 算好） */
-  max-width: 96px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 失联/未知时把标签也压暗，避免误以为正常 */
-.strip-row[data-status="unknown"] .strip-port {
-  color: rgb(148 163 184 / 60%);
-}
-
-/* 端口过多时允许滚动，而不是把窗口撑到屏幕外 */
+.strip-master { display: flex; position: relative; align-items: center; gap: 8px; height: 32px; min-height: 32px; padding: 0 6px; border-radius: 8px; background: transparent; text-align: left; }
+.strip-master:hover, .strip-row:hover { background: var(--panel-hover); }
+.strip-master-dot { width: 16px; height: 16px; flex: none; border-radius: 50%; background: var(--status-idle); }
+.strip-master-label { font-size: 11px; font-weight: 600; color: var(--panel-muted); }
 .strip-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  /*
-   * ★ 必须四个方向都留内边距 —— 这不是美观问题，是**防止圆点被裁**。
-   *
-   * `overflow-y: auto` 让这里成为滚动容器，而滚动容器会裁掉**超出其
-   * padding box** 的一切，包括子元素画在 border box 之外的 `box-shadow`
-   * （每个小灯都有 `0 0 0 1px` 描边 + `0 1px 4px` 投影，左右各外扩 4px）。
-   * 行原本填满整个容器，于是：
-   *   - 首行顶部的描边、末行底部的投影被切（垂直）
-   *   - **每行圆点左侧 4px 光晕被切**（水平）← 用户报的"左侧被割掉"
-   * 只加垂直 padding 是不够的，我第一版就犯了这个错。
-   *
-   * 留 6px 四周内边距后，投影落在 padding 区内，不再被裁。
-   * 尺寸影响由 overlay-layout.ts 的 STRIP_ROWS_PAD_X / _Y 对应计入。
-   */
-  padding: 6px;
-  max-height: 60vh;
-  overflow-y: auto;
-  scrollbar-width: none;
+  display: flex; flex-direction: column; gap: 6px; padding: 6px;
+  min-height: 0; overflow-y: auto; overflow-x: hidden;
 }
-
-.strip-rows::-webkit-scrollbar {
-  display: none;
+.strip-row {
+  display: flex; align-items: center; position: relative; flex: none;
+  gap: 6px; height: 32px; min-width: 32px; padding: 0 4px; border-radius: 8px;
+  background: transparent; text-align: left;
 }
-
-/* 没有端口任务时给一句提示，而不是一片空白 */
-.strip-empty {
-  font: 500 10px/1.4 ui-sans-serif, system-ui, sans-serif;
-  color: rgb(148 163 184 / 78%);
-  max-width: 120px;
+.tool-icon { width: 24px; height: 24px; display: grid; place-items: center; flex: none; color: var(--panel-fg); }
+.strip-dot {
+  width: 8px; height: 8px; position: absolute; left: 23px; bottom: 3px; flex: none;
+  border-radius: 50%; background: var(--status-idle); box-shadow: 0 0 0 2px var(--glass);
 }
-
-/* 灯带模式下把徽标挪到总灯角上 */
-.strip-master .lamp-badge {
-  position: static;
-  margin-left: 2px;
-}
-
-/* ============================================================================
- * ★ 灯带模式必须覆盖 .lamp-drag 的固定尺寸
- * ============================================================================
- * `.lamp-drag` 原本按**单灯**尺寸算：width/height = `--lamp-size + 16px`
- * （默认 28+16 = 44px）。灯带是 84px 宽、随端口数变高，塞进 44px 的框里会：
- *   1. 作为 flex 项被居中 -> 超出部分往上下两头溢出 -> **圆圈被窗口边缘裁掉**
- *   2. 只有中间 44x44 那一块能拖 -> 用户觉得"拖不动"
- *
- * 所以灯带模式下让它撑满整块画布（画布尺寸已由 overlay.ts 按内容算好）。
- * `body.strip-mode` 由 overlay.js 按 snapshot.stripMode 切换。
- */
-body.strip-mode .lamp-drag {
-  width: 100%;
-  height: 100%;
-}
-
-/* ============================================================================
- * ★ 边缘停靠：点阵形态（拖到侧边/顶部时只留灯，去掉文字）
- * ============================================================================
- * 用户要求：「拖到侧边或顶部的时候能够变成一排信号灯，没有那些后面的信号描述」。
- *
- * 形态由主进程判定（窗口离哪条屏幕边 ≤ DOCK_THRESHOLD），经 IPC_PUSH.LAYOUT
- * 下发；overlay.js 把 dock-* 类挂到 body 上，这里只负责画。
- *
- *  - dock-left / dock-right -> 竖排点阵（保持竖排，只把文字藏掉、留白收紧）
- *  - dock-top               -> 横排点阵（整条转 90°，总灯在左、各灯向右排）
- *
- * ⚠️ 尺寸常量与 overlay-layout.ts 的 COMPACT_* 一一对应。改这里必须同步改那边，
- *    否则圆点会被窗口边缘裁掉（这个坑在常规灯带上真实发生过）。
- * ==========================================================================*/
-
-/* 点阵形态：三处"装饰性"留白全部去掉，几何变得可精确预测 */
-body.dock-left .strip-rows,
-body.dock-right .strip-rows,
-body.dock-top .strip-rows {
-  padding: 0;
-  max-height: none;
-  overflow: visible;
-}
-
+.strip-port { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--panel-fg); }
 body.dock-left .lamp-strip,
 body.dock-right .lamp-strip,
 body.dock-top .lamp-strip {
-  gap: 6px;
-  padding: 4px;
+  padding: 4px; gap: 6px; max-height: calc(100vh - 16px); max-width: calc(100vw - 12px);
 }
-
+body.dock-left .strip-rows,
+body.dock-right .strip-rows,
+body.dock-top .strip-rows {
+  padding: 0; gap: 5px; overflow-y: auto; min-width: 0;
+}
 body.dock-left .strip-master,
 body.dock-right .strip-master,
-body.dock-top .strip-master {
-  width: auto;
-  border: none;
-  padding: 0;
-  margin: 0;
-}
-
-/* 点阵形态只要灯：标签与数量徽标都藏掉 */
+body.dock-top .strip-master { width: 32px; min-width: 32px; padding: 0; justify-content: center; flex: none; }
 body.dock-left .strip-port,
 body.dock-right .strip-port,
 body.dock-top .strip-port,
@@ -353,526 +86,75 @@ body.dock-right .strip-master-label,
 body.dock-top .strip-master-label,
 body.dock-left .strip-master .lamp-badge,
 body.dock-right .strip-master .lamp-badge,
-body.dock-top .strip-master .lamp-badge {
-  display: none;
-}
-
-/* 顶部停靠：整条转成横向排列 */
-body.dock-top .lamp-strip {
-  flex-direction: row;
-  align-items: center;
-}
-
-body.dock-top .strip-rows {
-  flex-direction: row;
-  align-items: center;
-}
-
-/* 侧边停靠：总灯居中于点阵列 */
-body.dock-left .strip-master,
-body.dock-right .strip-master {
-  justify-content: center;
-}
-
-/* 数量徽标（PRD P0-5：running=0 时不显示） */
-.lamp-badge {
-  position: absolute;
-  top: -5px;
-  right: -6px;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 3px;
-  border-radius: 8px;
-  background: rgb(17 24 39 / 92%);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 15px;
-  text-align: center;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 40%);
-}
-
-.lamp-badge[hidden] {
-  display: none;
-}
-
-/*
- * 临时提示条（原来是 .lamp-tooltip 悬停提示，已按用户要求移除）
- *
- * 【为什么删掉悬停提示】用户原话：「鼠标放上去就不需要文字提示了 乱糟糟的」。
- * 浮窗是个**常驻不打扰**的小挂件，鼠标扫过就弹一块多行文字正好破坏这一点；
- * 而状态信息**已经**由灯本身表达（圆点颜色 = 七态，端口标签 = 哪个实例）。
- * 需要更细的排查时，托盘菜单里有面板。
- *
- * ⚠️ 关键：**不能**再有 `:hover` 规则。
- * 原来这里是 `.lamp-stage:hover + .lamp-tooltip { opacity: 1 }` ——
- * 只看 JS 是找不到这个悬停行为的（JS 只写 textContent）。
- *
- * 现在只在 `.show` 时出现（`api.onToast` 加，4 秒后移除）。
- */
-.lamp-toast {
-  position: absolute;
-  left: 50%;
-  top: 2px;
-  transform: translateX(-50%);
-  max-width: 240px;
-  padding: 4px 8px;
-  border: 1px solid rgb(255 255 255 / 12%);
-  border-radius: 6px;
-  background: rgb(17 24 39 / 94%);
-  color: #e6e9ef;
-  font-size: 11px;
-  line-height: 1.3;
-  /* 一次性通知都是一句话，单行截断比换行更不打扰 */
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 160ms ease;
-}
-
-.lamp-toast.show {
-  opacity: 1;
-}
-
-/* ============================================================================
- * 状态动画（PRD §5.1：常亮/慢呼吸/呼吸脉冲/快闪/绿闪/双闪告警）
- * 注意：这里只定义**动效**，颜色一律走 CSS 变量，避免硬编码色值。
- * ==========================================================================*/
-
-.anim-steady {
-  animation: none;
-}
-
-.anim-breathe-slow {
-  animation: breathe 3.2s ease-in-out infinite;
-}
-
-.anim-breathe {
-  animation: breathe 2s ease-in-out infinite;
-}
-
-.anim-blink-fast {
-  animation: blink 0.6s steps(2, start) infinite;
-}
-
-.anim-flash-once {
-  animation: flash-once 1.1s ease-out 1;
-}
-
-.anim-alarm {
-  animation: alarm 1.2s ease-in-out infinite;
-}
-
-@keyframes breathe {
-  0%,
-  100% {
-    opacity: var(--lamp-opacity);
-    transform: scale(1);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.12);
-  }
-}
-
-@keyframes blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
-}
-
-@keyframes flash-once {
-  0% {
-    opacity: 1;
-    transform: scale(1.25);
-  }
-  100% {
-    opacity: var(--lamp-opacity);
-    transform: scale(1);
-  }
-}
-
-@keyframes alarm {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  25% {
-    opacity: 1;
-    transform: scale(1.15);
-  }
-  50% {
-    opacity: 0.6;
-    transform: scale(1);
-  }
-  75% {
-    opacity: 1;
-    transform: scale(1.15);
-  }
-}
-
-/* ============================================================================
- * 任务列表面板（panel 窗口）
- * ==========================================================================*/
-
-.panel-body {
-  width: 100vw;
-  height: 100vh;
-  overflow: hidden;
-  border: 1px solid var(--panel-border);
-  border-radius: 10px;
-  background: var(--panel-bg);
-  color: var(--panel-fg);
-  box-shadow: 0 10px 32px rgb(0 0 0 / 38%);
-}
-
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 38px;
-  padding: 0 8px 0 12px;
-  border-bottom: 1px solid var(--panel-border);
-  -webkit-app-region: drag;
-}
-
-.panel-title {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-}
-
-.panel-header-actions {
-  display: flex;
-  gap: 2px;
-  -webkit-app-region: no-drag;
-}
-
-.icon-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--panel-muted);
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
-}
-
-.icon-btn:hover {
-  background: var(--panel-hover);
-  color: var(--panel-fg);
-}
-
-/* 摘要条 */
-.panel-summary {
-  display: flex;
-  gap: 4px;
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--panel-border);
-  font-size: 11px;
-}
-
-.summary-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
-  border-radius: 10px;
-  background: var(--panel-hover);
-}
-
-.summary-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-
-/* 各状态的点色走 CSS 变量（由 JS 写入真实状态色） */
-.summary-item[data-status='running'] .summary-dot {
-  background: var(--status-running);
-}
-.summary-item[data-status='waiting'] .summary-dot {
-  background: var(--status-waiting);
-}
-.summary-item[data-status='success'] .summary-dot {
-  background: var(--status-success);
-}
-.summary-item[data-status='failed'] .summary-dot {
-  background: var(--status-failed);
-}
-
-.summary-label {
-  color: var(--panel-muted);
-}
-
-.summary-count {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-/* 任务列表：PRD §7.3 最大高度 70vh 内部滚动 */
-.panel-list {
-  height: calc(100vh - 38px - 34px - 26px);
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 4px 0;
-}
-
-.panel-list::-webkit-scrollbar {
-  width: 8px;
-}
-
-.panel-list::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: 4px;
-  background: var(--panel-border);
-  background-clip: content-box;
-}
-
-/* 任务行 */
-.task-row {
-  position: relative;
-  display: grid;
-  grid-template-columns: 4px 20px 1fr auto;
-  gap: 8px;
-  align-items: center;
-  min-height: 64px;
-  padding: 8px 10px 8px 6px;
-  border-bottom: 1px solid var(--panel-border);
-}
-
-.task-row:last-child {
-  border-bottom: none;
-}
-
-.task-row:hover {
-  background: var(--panel-hover);
-}
-
-/* 左侧 8px 状态色条（PRD §7.3：左侧 8px 色条 + 状态图标） */
-.task-stripe {
-  width: 4px;
-  height: 100%;
-  min-height: 44px;
-  border-radius: 2px;
-  background: var(--status-idle);
-}
-
-.task-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  font-size: 13px;
-  text-align: center;
-}
-
-.task-main {
-  min-width: 0;
-}
-
-.task-line1 {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
-
-.task-name {
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.task-row.unread .task-name {
-  font-weight: 800;
-}
-
-/* 未读小圆点 */
-.task-unread-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--panel-fg);
-}
-
-.task-meta {
-  font-size: 10px;
-  color: var(--panel-muted);
-}
-
-.task-meta-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.task-sub {
-  overflow: hidden;
-  font-size: 10px;
-  color: var(--panel-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.task-sub + .task-sub {
-  margin-top: 2px;
-}
-
-/* 右侧耗时 */
-.task-elapsed {
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--panel-muted);
-  white-space: nowrap;
-}
-
-/* 行内操作按钮：PRD §7.3 要求可点区域 >= 32px */
-.task-actions {
-  display: flex;
-  grid-column: 1 / -1;
-  gap: 4px;
-  justify-content: flex-end;
-  margin-top: 2px;
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-
-.task-row:hover .task-actions,
-.task-row:focus-within .task-actions {
-  opacity: 1;
-}
-
-.task-action-btn {
-  min-width: 32px;
-  height: 26px;
-  padding: 0 8px;
-  border: 1px solid var(--panel-border);
-  border-radius: 5px;
-  background: transparent;
-  color: var(--panel-muted);
-  font-size: 10px;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
-}
-
-.task-action-btn:hover {
-  border-color: var(--panel-muted);
-  background: var(--panel-hover);
-  color: var(--panel-fg);
-}
-
-.task-action-btn.primary {
-  border-color: var(--status-running);
-  color: var(--status-running);
-}
-
-/* 进度条（webhook progress） */
-.task-progress {
-  grid-column: 2 / -1;
-  height: 3px;
-  margin-top: 4px;
-  border-radius: 2px;
-  background: var(--panel-border);
-  overflow: hidden;
-}
-
-.task-progress-bar {
-  height: 100%;
-  border-radius: 2px;
-  background: var(--status-running);
-  transition: width 200ms ease;
-}
-
-/* 空态（PRD §7.3） */
-.panel-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 28px 20px;
-  color: var(--panel-muted);
-  text-align: center;
-}
-
-.panel-empty[hidden] {
-  display: none;
-}
-
-.empty-title {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--panel-fg);
-}
-
-.empty-hint {
-  margin: 0;
-  font-size: 11px;
-  line-height: 1.6;
-}
-
-.empty-hint code {
-  padding: 2px 5px;
-  border-radius: 4px;
-  background: var(--panel-hover);
-  font-size: 10px;
-  word-break: break-all;
-}
-
-.panel-footer {
-  display: flex;
-  align-items: center;
-  height: 26px;
-  padding: 0 12px;
-  border-top: 1px solid var(--panel-border);
-  color: var(--panel-muted);
-  font-size: 10px;
-}
-
-/* 面板内轻提示（配置重载等） */
-.panel-toast {
-  position: absolute;
-  bottom: 32px;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: 340px;
-  padding: 7px 12px;
-  border: 1px solid var(--panel-border);
-  border-radius: 7px;
-  background: rgb(17 24 39 / 95%);
-  color: #e6e9ef;
-  font-size: 11px;
-  box-shadow: 0 6px 18px rgb(0 0 0 / 34%);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 200ms ease;
-}
-
-.panel-toast.show {
-  opacity: 1;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .anim-breathe,
-  .anim-breathe-slow,
-  .anim-blink-fast,
-  .anim-alarm,
-  .anim-flash-once {
-    animation: none;
-  }
-}
+body.dock-top .strip-master .lamp-badge { display: none; }
+body.dock-top .lamp-strip { flex-direction: row; align-items: center; }
+body.dock-top .strip-rows { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+.lamp-badge { position: absolute; right: -5px; top: -5px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: var(--panel-fg); color: var(--panel-bg); font-size: 10px; font-weight: 700; text-align: center; line-height: 15px; }
+.strip-master .lamp-badge { right: 0; top: 0; }
+.lamp-toast { position: fixed; left: 6px; right: 6px; bottom: 6px; z-index: 20; padding: 7px; border-radius: 8px; background: var(--panel-card); color: var(--panel-fg); font-size: 11px; opacity: 0; pointer-events: none; }
+.lamp-toast { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lamp-toast.show { opacity: 1; }
+
+.panel-body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; color: var(--panel-fg); background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 12px; font-size: 12px; }
+.panel-header { display: flex; align-items: flex-start; justify-content: space-between; flex: none; padding: 22px 20px 17px; -webkit-app-region: drag; }
+.panel-eyebrow { color: var(--accent); font-size: 10px; font-weight: 700; letter-spacing: 2px; margin-bottom: 5px; }
+.panel-title { font-size: 22px; font-weight: 650; letter-spacing: -.6px; }
+#monitoring-hint { margin-top: 6px; color: var(--panel-muted); font-size: 11px; }
+.panel-header-actions { display: flex; gap: 6px; align-items: center; }
+.icon-btn { width: 32px; height: 32px; border-radius: 8px; background: transparent; color: var(--panel-muted); }
+.pause-btn { height: 32px; padding: 0 10px; border: 1px solid var(--panel-border); border-radius: 8px; background: var(--panel-card); font-size: 11px; }
+.icon-btn:hover, .pause-btn:hover { background: var(--panel-hover); }
+.pause-btn[aria-pressed="true"] { color: var(--accent); background: var(--accent-bg); }
+.panel-summary { margin: 0 20px 16px; padding: 12px 0; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--panel-border); border-bottom: 1px solid var(--panel-border); flex: none; }
+.summary-item { display: grid; grid-template-columns: 7px 1fr; align-items: center; gap: 5px; padding-left: 10px; border-left: 1px solid var(--panel-border); }
+.summary-item:first-child { border-left: 0; padding-left: 0; }
+.summary-dot { width: 5px; height: 5px; border-radius: 50%; }
+.summary-label { font-size: 11px; color: var(--panel-muted); }
+.summary-count { grid-column: 2; font-size: 22px; font-weight: 600; line-height: 26px; font-variant-numeric: tabular-nums; }
+[data-status="running"] .summary-dot { background: var(--status-running); }
+[data-status="waiting"] .summary-dot { background: var(--status-waiting); }
+[data-status="success"] .summary-dot { background: var(--status-success); }
+[data-status="failed"] .summary-dot { background: var(--status-failed); }
+.panel-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 16px 8px 20px; }
+.task-row { position: relative; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 10px; padding: 14px; margin-bottom: 10px; border: 1px solid var(--panel-border); border-radius: 12px; background: var(--panel-card); cursor: pointer; }
+.task-row:hover { border-color: var(--panel-muted); }
+.task-stripe { position: absolute; top: 16px; left: -1px; height: 20px; width: 3px; border-radius: 0 3px 3px 0; }
+.task-icon { width: 36px; height: 36px; display: grid; place-items: center; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 10px; color: var(--panel-muted); }
+.task-main { min-width: 0; }
+.task-line1 { display: flex; align-items: center; gap: 6px; min-height: 18px; }
+.task-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-unread-dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--status-success); }
+.task-meta { margin-top: 4px; font-size: 11px; color: var(--panel-muted); font-variant-numeric: tabular-nums; }
+.task-sub { margin-top: 7px; font-size: 11px; color: var(--panel-muted); line-height: 1.6; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.task-sub-cwd { white-space: nowrap; display: block; }
+.task-actions { grid-column: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.task-action-btn { min-height: 32px; padding: 0 10px; border-radius: 7px; background: transparent; font-size: 11px; text-align: left; }
+.task-action-btn.primary { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.task-action-btn:hover { background: var(--panel-hover); }
+.task-more { position: relative; color: var(--panel-muted); }
+.task-more summary { list-style: none; display: flex; align-items: center; min-height: 32px; padding: 0 10px; border-radius: 7px; font-size: 11px; }
+.task-more summary::-webkit-details-marker { display: none; }
+.task-more summary::after { content: '⌄'; margin-left: 6px; }
+.task-more summary:hover { background: var(--panel-hover); }
+.task-menu { display: flex; flex-direction: column; min-width: 114px; padding: 4px; border: 1px solid var(--panel-border); border-radius: 9px; background: var(--panel-bg); margin-top: 4px; }
+.task-more[open] { align-self: flex-start; }
+.task-progress { grid-column: 1 / -1; height: 3px; background: var(--panel-border); border-radius: 3px; overflow: hidden; }
+.task-progress-bar { height: 100%; background: var(--status-running); }
+.panel-empty { flex: 1; padding: 36px 24px; text-align: center; }
+.empty-title { font-size: 16px; font-weight: 600; }
+.empty-hint { color: var(--panel-muted); font-size: 12px; line-height: 1.8; }
+.panel-footer { flex: none; display: flex; justify-content: space-between; padding: 12px 20px; border-top: 1px solid var(--panel-border); color: var(--panel-muted); font-size: 11px; }
+.footer-key { opacity: .8; }
+.panel-toast { position: fixed; z-index: 50; left: 20px; right: 20px; bottom: 48px; border-radius: 10px; background: var(--panel-fg); color: var(--panel-bg); padding: 12px 14px; font-size: 12px; box-shadow: 0 4px 16px rgb(0 0 0 / 15%); opacity: 0; pointer-events: none; }
+.panel-toast { line-height: 1.6; overflow-wrap: anywhere; max-height: calc(100vh - 100px); overflow-y: auto; }
+.panel-toast.show { opacity: 1; pointer-events: auto; }
+.anim-steady { animation: none; }
+.anim-breathe-slow { animation: breathe 2.4s ease-in-out infinite; }
+.anim-breathe { animation: breathe 1.8s ease-in-out infinite; }
+.anim-blink-fast { animation: blink 1s ease-in-out infinite; }
+.anim-flash-once { animation: flash .7s ease-out 2; }
+.anim-alarm { animation: blink .7s ease-in-out infinite; }
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes flash { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

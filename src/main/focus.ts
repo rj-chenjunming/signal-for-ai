@@ -40,6 +40,8 @@
  */
 
 import { spawn } from 'node:child_process';
+import { buildHiddenWindowScript, parseHiddenWindow } from './hidden-window';
+import { buildDshNativeRevealScript } from './dsh-native-reveal';
 
 import {
   FOCUS_LEVELS,
@@ -446,6 +448,41 @@ export class FocusService {
     return this.knownWindows.find(matches) ?? null;
   }
 
+  private async findHiddenWindow(processNames: readonly string[], title: string): Promise<TerminalWindow | null> {
+    try {
+      const result = await this.spawner.exec('powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', buildHiddenWindowScript(processNames)], this.probeTimeoutMs);
+      if (!result.ok) {
+        this.logger.warn('隐藏主窗口查询不可用或超时');
+        return null;
+      }
+      const win = parseHiddenWindow(result.stdout, processNames, title);
+      this.logger.info(win ? `已找到配置进程的隐藏主窗口（pid=${win.pid} hwnd=${win.hwnd}）` : '未找到唯一的隐藏主窗口');
+      return win;
+    } catch {
+      this.logger.warn('隐藏主窗口查询失败（已隔离）');
+      return null;
+    }
+  }
+
+  private async revealDshWindow(win: TerminalWindow): Promise<boolean> {
+    if (win.pid === null || win.hwnd === null) return false;
+    try {
+      const result = await this.spawner.exec('powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', buildDshNativeRevealScript(win.pid, win.hwnd)], this.focusTimeoutMs);
+      if (!result.ok || !result.stdout.includes('LAMPDSHREVEAL ok=True')) {
+        this.logger.warn('dsh 自身窗口恢复失败或超时，未强制显示');
+        return false;
+      }
+      const confirmed = await this.verifyForeground(win.hwnd);
+      this.logger.info(confirmed ? 'dsh 自身恢复成功，前台 HWND 已确认' : 'dsh 自身恢复后未确认前台 HWND');
+      return confirmed;
+    } catch {
+      this.logger.warn('dsh 自身窗口恢复不可用（已隔离，未强制显示）');
+      return false;
+    }
+  }
+
   /**
    * 用 CDP 精确激活 `url` 所在的浏览器标签页（无论它是不是激活标签）。
    *
@@ -528,6 +565,7 @@ export class FocusService {
     const cwd = jump?.cwd;
     const logFile = jump?.logFile;
     const terminal = jump?.terminal;
+    let desktopFailure: string | undefined;
 
     /* ---------------- L0：显式 URL（最高优先级） ----------------
      *
@@ -690,22 +728,37 @@ export class FocusService {
     /* ---------------- L2：显式桌面目标，等待激活确认 ---------------- */
     if (terminal?.type === 'windowTitle' || terminal?.type === 'windowProcess') {
       const title = terminal.type === 'windowTitle' ? terminal.match : terminal.titleContains ?? '';
+      // A cached HWND may have been closed/reused since the last click.
+      await this.refreshWindows();
       let win = this.findWindowByTitle(title, terminal.processNames);
       if (win === null) {
         await this.refreshWindows();
         win = this.findWindowByTitle(title, terminal.processNames);
       }
-      let activated = win !== null && await this.focusExistingWindow(win);
+      if (win === null && terminal.type === 'windowProcess') {
+        win = await this.findHiddenWindow(terminal.processNames, title);
+      }
+      const activate = (candidate: TerminalWindow): Promise<boolean> =>
+        terminal.type === 'windowProcess' && task.monitor.type === 'dsh' &&
+        normalizeProcessName(candidate.processName) === 'deepseek harness'
+          ? this.revealDshWindow(candidate) : this.focusExistingWindow(candidate);
+      let activated = win !== null && await activate(win);
       if (win !== null && !activated) {
         const oldHwnd = win.hwnd;
         await this.refreshWindows();
         win = this.findWindowByTitle(title, terminal.processNames);
-        if (win !== null && win.hwnd !== oldHwnd) activated = await this.focusExistingWindow(win);
+        if (win === null && terminal.type === 'windowProcess') {
+          win = await this.findHiddenWindow(terminal.processNames, title);
+        }
+        if (win !== null && win.hwnd !== oldHwnd) activated = await activate(win);
       }
       if (activated && win !== null) {
         return { ok: true, level: FOCUS_LEVELS.WINDOW_FOCUS, detail: `已切到窗口「${win.title || win.processName}」` };
       }
       this.logger.warn(`桌面目标未找到或激活未确认：${title || terminal.processNames?.join(', ')}`);
+      desktopFailure = win === null
+        ? `未找到 ${task.name} 主窗口，请先打开工具后重试`
+        : `未能切回 ${task.name}，请先从任务栏打开工具后重试`;
     }
     // 没有明确目标时不盲抢第一个终端；只允许用户配置的目录/日志降级。
 
@@ -743,7 +796,7 @@ export class FocusService {
     return {
       ok: false,
       level: FOCUS_LEVELS.NONE,
-      detail: '无法定位终端：未配置可用的 cwd / logFile，且窗口聚焦失败',
+      detail: desktopFailure ?? '无法定位终端：未配置可用的 cwd / logFile，且窗口聚焦失败',
     };
   }
 
@@ -751,7 +804,7 @@ export class FocusService {
   async focusExistingWindow(win: TerminalWindow): Promise<boolean> {
     // 显式校验 HWND 有效性。INVALID_HANDLE=0 对 pid 无效；
     // 对 hwnd 而言 0 号窗口是有效的桌面窗口，故这里只排除**缺失**情况。
-    if (win.hwnd === null || win.pid === null || win.pid === INVALID_HANDLE) {
+    if (win.hwnd === null || win.pid === null || !Number.isSafeInteger(win.pid) || win.pid <= 0) {
       this.logger.warn('focusExistingWindow:窗口句柄信息不完整，跳过');
       return false;
     }
@@ -769,11 +822,12 @@ export class FocusService {
     // 另外 Windows 有**前台锁**：后台进程直接 SetForegroundWindow 会失败
     // （实测返回 False，前台仍停在别的窗口）。AttachThreadInput 把本线程挂到
     // 当前前台线程上，这次切换就被视作"前台线程自己发起的"，从而被允许。
-    const viaWin32 = await this.activateViaWin32(win.hwnd, win.title);
+    const viaWin32 = await this.activateViaWin32(win.hwnd, win.pid);
     if (viaWin32.ok) {
       this.logger.info(`已通过 Win32 激活窗口「${win.title || win.processName}」`);
       return true;
     }
+    if (viaWin32.detail === 'stale window') return false;
 
     // 兜底：AppActivate（纯 COM，不需要 Add-Type）。
     // 某些环境里 Add-Type 内联编译可能被安全策略拦（POC §1 记过这一条），
@@ -820,7 +874,7 @@ export class FocusService {
    */
   private async activateViaWin32(
     hwnd: number,
-    titleForMatch: string,
+    pid: number,
   ): Promise<{ ok: boolean; detail: string }> {
     // 窗口句柄来自枚举结果（数字），只接受正整数，避免拼进脚本造成注入
     if (!Number.isInteger(hwnd) || hwnd <= 0) {
@@ -836,10 +890,14 @@ export class FocusService {
       '  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);',
       '  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);',
       '  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();',
+      '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);',
       '  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);',
       '}',
       '"@',
       `$h = [IntPtr]${hwnd}`,
+      '[uint32]$ownerPid = 0',
+      '[void][LampFocus]::GetWindowThreadProcessId($h, [ref]$ownerPid)',
+      `if ($ownerPid -ne ${pid}) { Write-Output 'LAMPFOCUS stale=True'; exit 0 }`,
       // ★ 关键：无论当前是否最小化，都先最小化再恢复。
       //   这个往返让 Windows 授予前台权限（实测唯一有效的路径）。
       '[void][LampFocus]::ShowWindow($h, 6)', // SW_MINIMIZE
@@ -864,6 +922,7 @@ export class FocusService {
       if (!result.ok) {
         return { ok: false, detail: result.stderr.trim().slice(0, 160) || 'exec 失败' };
       }
+      if (/LAMPFOCUS stale=True/u.test(result.stdout)) return { ok: false, detail: 'stale window' };
       const ok = /LAMPFOCUS ok=True/u.test(result.stdout);
       return {
         ok,
@@ -874,8 +933,6 @@ export class FocusService {
       this.logger.warn(`Win32 激活异常（已隔离，将退到 AppActivate）：${(err as Error).message}`);
       return { ok: false, detail: 'exception' };
     }
-    // titleForMatch 目前只用于日志可读性，保留参数以便将来做校验
-    void titleForMatch;
   }
 
   private async verifyForeground(hwnd: number): Promise<boolean> {

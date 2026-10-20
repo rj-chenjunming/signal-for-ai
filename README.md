@@ -102,7 +102,7 @@ npm run build && npm start -- --config D:/path/to/your-config.yaml
 
 配置文件的 `tasks` 数组里，每个任务用 `monitor.type` 指定监控方式：`process` / `log` / `webhook` / `dsh` / `sqlite` / `codex`。
 
-Codex 使用 `type: codex` 读取本地 `.codex/sessions` 的结构化 rollout 事件。支持 `sessionsDir`、`intervalMs`（默认 2000）、`activeWithinMs`（默认 300000）；不会在启动时重放历史完成，不保证读取审批等待。详细边界与完整示例见 [桌面指南](./docs/development/desktop-validation.md)。
+Codex 使用 `type: codex` 读取本地 `.codex/sessions` 的结构化 rollout 事件。支持 `sessionsDir`、`intervalMs`（默认 2000）、`activeWithinMs`（默认 300000）；不会在启动时重放历史完成。可选 `approvalEventsFile` 配合用户信任的官方 Hook，在请求审批时黄灯、对应工具返回后恢复；仅 rollout 不保证审批等待。安装及边界见 [授权 Hook 指南](./docs/development/codex-approval-hooks.md) 与 [桌面指南](./docs/development/desktop-validation.md)。
 
 Codex 回合完成后保留绿灯，点击确认或默认十分钟到期后显示灰色空闲行；新的回合显示蓝灯。采集器分块追平并保留长回合的开始证据，历史未知会话不会抹掉本轮明确完成；首次读取很大的会话文件可能需要数轮轮询。修复与验证见 [SPEC-010](./docs/specs/010-codex-completion-continuity.md)。
 

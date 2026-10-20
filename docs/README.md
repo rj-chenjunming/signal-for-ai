@@ -7,6 +7,7 @@
 | [开发流程](development/spec-tdd.md) | 阶段、进入/退出条件、完成门槛 |
 | [测试与验收](development/testing.md) | 本项目命令、测试分层、Windows 与云端边界 |
 | [三工具桌面验收](development/desktop-validation.md) | dsh / WorkBuddy / Codex 配置、边界与真机清单 |
+| [Codex 授权 Hook](development/codex-approval-hooks.md) | 可选审批黄灯、安装信任与验证边界 |
 | [规格索引](specs/README.md) | 本轮规格、迭代状态、下一步 |
 | [当前基线](specs/000-baseline.md) | 已有能力、不变量、代码/测试入口 |
 | [变更模板](specs/_template.md) | 新需求、缺陷、重构的统一工作记录 |

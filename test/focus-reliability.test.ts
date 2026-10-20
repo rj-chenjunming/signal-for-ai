@@ -63,13 +63,16 @@ describe('SPEC-002/AC-03 桌面切换', () => {
     expect(f.spawns).toEqual([]);
   });
 
-  it('应用重启后旧 HWND 激活失败，重新枚举并切到新窗口', async () => {
+  it('枚举后应用重启导致旧 HWND 激活失败，重新枚举并切到新窗口', async () => {
     const f = setup();
     const svc = new FocusService({ spawner: f.spawner, tasks: () => [{ ...task, jump }] });
     await svc.refreshWindows();
     const original = f.spawner.exec;
+    let reads = 0;
+    // SPEC-013 refreshes before every click. Simulate the restart after that
+    // refresh, so this still protects the failed-activation retry path.
     f.spawner.exec = async (cmd, args, timeout) => args.join(' ').includes('Get-Process |')
-      ? { ok: true, stdout: JSON.stringify([{ ...window, Id: 43, MainWindowHandle: 501 }]), stderr: '', code: 0 }
+      ? { ok: true, stdout: JSON.stringify([++reads === 1 ? window : { ...window, Id: 43, MainWindowHandle: 501 }]), stderr: '', code: 0 }
       : original(cmd, args, timeout);
     const activation = vi.spyOn(svc, 'focusExistingWindow').mockImplementation(async win => win.hwnd === 501);
     const result = await svc.focusTerminal(task, { terminal: jump.terminal });

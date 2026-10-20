@@ -311,8 +311,11 @@ async function startApplication(): Promise<void> {
   registerIpcHandlers(
     {
       getSnapshot: () => store.getSnapshot(),
+      showPanelMessage: (message) => panel.showMessage(message),
+      takePanelMessage: () => panel.takeMessage(),
       // 停靠形态取决于窗口位置，只有 OverlayWindow 知道；渲染层挂载时会主动拉一次
       getLayout: () => ({ dock: overlay.currentDock }),
+      setMonitoringPaused: (paused) => togglePause(paused),
       handleTaskAction: (req) => handleTaskAction(req),
       handleNotifyAction: (taskId, action) => handleNotifyAction(taskId, action),
       togglePanel: () => panel.toggle(),
@@ -532,7 +535,7 @@ async function focusTask(taskId: string): Promise<void> {
   }
 }
 
-async function togglePause(paused: boolean): Promise<void> {
+async function togglePause(paused: boolean): Promise<{ ok: boolean; message?: string }> {
   try {
     await refs.monitors.setPaused(paused);
     refs.store.setPaused(paused);
@@ -541,8 +544,10 @@ async function togglePause(paused: boolean): Promise<void> {
     } else {
       logger.info('监控已恢复');
     }
+    return { ok: true };
   } catch (err) {
     logger.error('切换暂停状态异常（已隔离）', err);
+    return { ok: false, message: '切换监控状态失败，请重试' };
   }
 }
 

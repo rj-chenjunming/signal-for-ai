@@ -168,7 +168,7 @@ function applyStatusColorTo(el: HTMLElement, status: AiTaskStatus): void {
 /** 已渲染的端口行，按 taskId 缓存以便原地更新（避免每帧重建 DOM）。 */
 const stripRowCache = new Map<
   string,
-  { row: HTMLDivElement; dot: HTMLDivElement; port: HTMLSpanElement }
+  { row: HTMLButtonElement; dot: HTMLDivElement; port: HTMLSpanElement; icon: HTMLSpanElement }
 >();
 
 /**
@@ -242,7 +242,7 @@ function renderStripMode(snapshot: AiSnapshot): void {
 
     let entry = stripRowCache.get(task.taskId);
     if (!entry) {
-      const row = document.createElement('div');
+      const row = document.createElement('button');
       row.className = 'strip-row';
       // 每个端口一行可单独点击：点击 = 跳到那个任务 + 熄灭它的完成提醒
       row.dataset['taskId'] = task.taskId;
@@ -253,7 +253,9 @@ function renderStripMode(snapshot: AiSnapshot): void {
       const port = document.createElement('span');
       port.className = 'strip-port';
       port.textContent = task.portLabel ?? task.taskId;
-
+      const icon = document.createElement('span');
+      icon.className = 'tool-icon';
+      row.appendChild(icon);
       row.appendChild(dot);
       row.appendChild(port);
       stripRows.appendChild(row);
@@ -274,8 +276,8 @@ function renderStripMode(snapshot: AiSnapshot): void {
       // 两条动作各自独立发出（互不阻塞）
       const send = (action: 'focus_terminal' | 'mark_read'): void => {
         void api?.sendTaskAction({ taskId: task.taskId, action }).then((result) => {
-          if (!result.ok) showLampToast(result.message ?? '操作未完成，请从面板重试');
-        }).catch(() => showLampToast('操作失败，请从面板查看或重试'));
+          if (!result.ok) void showActionError(result.message ?? '操作未完成，请从面板重试');
+        }).catch(() => { void showActionError('操作失败，请从面板查看或重试'); });
       };
 
       // ⚠️ 「是否完成态」必须在**点击那一刻**读，不能捕获创建时的 task.status。
@@ -296,13 +298,16 @@ function renderStripMode(snapshot: AiSnapshot): void {
         if (now === 'success' || now === 'failed') send('mark_read');
       });
 
-      entry = { row, dot, port };
+      entry = { row, dot, port, icon };
       stripRowCache.set(task.taskId, entry);
     }
 
     applyStatusColorTo(entry.dot, task.status);
     applyAnimationTo(entry.dot, task.status);
     entry.row.dataset['status'] = task.status;
+    entry.row.setAttribute('aria-label', `${task.name} · ${statusLabel(task.status)}`);
+    entry.port.textContent = task.portLabel ?? task.name;
+    entry.icon.innerHTML = window.aiIndicatorUi?.icon(task.toolKind ?? 'generic') ?? '';
     // ★ 刻意**不设** `row.title`。
     //
     // 原来这里写的是 `describeTask(task)`，鼠标一放上去就弹出
@@ -333,6 +338,10 @@ lampCore.addEventListener('click', () => {
   if (api) {
     void api.togglePanel();
   }
+});
+
+document.getElementById('strip-master')?.addEventListener('click', () => {
+  void api?.togglePanel();
 });
 
 // 键盘可达性：灯窗口 focusable=false，但仍支持 Enter/Space 语义
@@ -416,6 +425,16 @@ function showLampToast(message: string): void {
   lampToast.textContent = message;
   lampToast.classList.add('show');
   window.setTimeout(() => lampToast.classList.remove('show'), 4000);
+}
+
+async function showActionError(message: string): Promise<void> {
+  try {
+    const result = await api?.showPanelMessage(message);
+    if (result?.ok) return;
+  } catch {
+    // The feedback channel must not break independent completion acknowledgement.
+  }
+  showLampToast('切换失败，请打开面板');
 }
 
 async function reportPosition(): Promise<void> {

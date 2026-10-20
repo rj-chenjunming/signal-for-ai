@@ -57,6 +57,9 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 }
 
 const api: RendererApi = {
+  showPanelMessage: (message: string): Promise<TaskActionResponse> => ipcRenderer.invoke(IPC.SHOW_PANEL_MESSAGE, message),
+  takePanelMessage: (): Promise<{ message?: string }> => ipcRenderer.invoke(IPC.TAKE_PANEL_MESSAGE),
+  setMonitoringPaused: (paused: boolean): Promise<TaskActionResponse> => ipcRenderer.invoke(IPC.SET_MONITORING_PAUSED, paused),
   getSnapshot: (): Promise<Snapshot> => ipcRenderer.invoke(IPC.GET_SNAPSHOT),
 
   getLayout: (): Promise<LampLayout> => ipcRenderer.invoke(IPC.GET_LAYOUT),

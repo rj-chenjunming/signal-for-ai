@@ -49,13 +49,13 @@ const STATUS_VISUAL: Record<AiTaskStatus, { colorVar: string; icon: string; labe
   unknown: { colorVar: '--status-unknown', icon: '?', label: '失联' },
 };
 
-/** 行内按钮定义（PRD §7.3：hover 时显示；可点区域 >= 32px）。 */
+/** 主动作常显，次要动作收进 details；可点区域 >= 32 DIP。 */
 const ROW_ACTIONS: { id: AiTaskAction; label: string; primary?: boolean }[] = [
-  { id: 'focus_terminal', label: '打开终端', primary: true },
+  { id: 'focus_terminal', label: '切回工具', primary: true },
   { id: 'open_log', label: '日志' },
   { id: 'open_dir', label: '目录' },
-  { id: 'retry', label: '重试' },
-  { id: 'mark_read', label: '已读' },
+  { id: 'retry', label: '重新监控' },
+  { id: 'mark_read', label: '标记已读' },
 ];
 
 let lastVersion = -1;
@@ -167,10 +167,12 @@ function createRow(task: AiTaskState): HTMLElement {
       <div class="task-sub task-sub-msg" hidden></div>
     </div>
     <div class="task-progress" hidden><div class="task-progress-bar"></div></div>
-    <div class="task-actions"></div>
+    <div class="task-actions"><details class="task-more"><summary>更多</summary><div class="task-menu"></div></details></div>
   `;
 
   const actionsEl = row.querySelector('.task-actions') as HTMLDivElement;
+  const more = row.querySelector('.task-more') as HTMLDetailsElement;
+  more.addEventListener('click', event => event.stopPropagation());
   for (const action of ROW_ACTIONS) {
     const btn = document.createElement('button');
     btn.className = `task-action-btn${action.primary ? ' primary' : ''}`;
@@ -179,12 +181,14 @@ function createRow(task: AiTaskState): HTMLElement {
     btn.title = `${action.label}：${task.name}`;
     btn.addEventListener('click', (event) => {
       event.stopPropagation();
+      more.open = false;
       void handleAction(task.taskId, action.id);
     });
-    actionsEl.appendChild(btn);
+    if (action.primary) actionsEl.insertBefore(btn, more);
+    else (row.querySelector('.task-menu') as HTMLElement).appendChild(btn);
   }
 
-  // 点击整行 = 跳转到任务现场（等价于点「打开终端」）
+  // 点击整行 = 跳转到任务现场（等价于点「切回工具」）
   row.addEventListener('click', () => {
     void handleAction(task.taskId, 'focus_terminal');
   });
@@ -200,8 +204,8 @@ function updateRow(row: HTMLElement, task: AiTaskState): void {
     `var(${visual.colorVar})`;
 
   const icon = row.querySelector('.task-icon') as HTMLDivElement;
-  icon.textContent = visual.icon;
-  icon.style.color = `var(${visual.colorVar})`;
+  icon.innerHTML = window.aiIndicatorUi?.icon(task.toolKind ?? 'generic') ?? visual.icon;
+  row.dataset.status = task.status;
 
   (row.querySelector('.task-name') as HTMLSpanElement).textContent = task.name;
 
@@ -212,6 +216,7 @@ function updateRow(row: HTMLElement, task: AiTaskState): void {
   // 状态文案 + 耗时
   const statusLabel = row.querySelector('.task-status-label') as HTMLSpanElement;
   const elapsed = row.querySelector('.task-elapsed') as HTMLSpanElement;
+  statusLabel.style.color = `var(${visual.colorVar})`;
   if (task.status === 'success' || task.status === 'failed') {
     statusLabel.textContent = `${visual.label} · `;
     elapsed.textContent = task.durationMs ? formatDuration(task.durationMs) : '';
@@ -241,13 +246,29 @@ function updateRow(row: HTMLElement, task: AiTaskState): void {
     progressWrap.hidden = true;
   }
 
-  row.style.opacity = task.paused ? '0.5' : '1';
+  const paused = task.paused || currentSnapshot?.paused === true;
+  if (!task.enabled || paused) {
+    statusLabel.textContent = !task.enabled ? '已停用' : '监控已暂停';
+    statusLabel.style.color = 'var(--panel-muted)';
+    elapsed.textContent = '';
+  }
+  const available = task.availableActions ?? ['focus_terminal', 'retry', 'mark_read'];
+  for (const action of ROW_ACTIONS) {
+    const button = row.querySelector(`[data-action="${action.id}"]`) as HTMLButtonElement;
+    button.hidden = !available.includes(action.id) || (action.id === 'mark_read' && !task.unread);
+    button.disabled = action.id === 'retry' && (!task.enabled || paused);
+    button.title = `${action.label}：${task.name}`;
+  }
 }
 
 /** 暂停状态提示。 */
 function renderPausedHint(snapshot: AiSnapshot): void {
-  btnPause.textContent = snapshot.paused ? '▶' : '⏸';
-  btnPause.title = snapshot.paused ? '恢复监控' : '暂停监控（也可在托盘菜单操作）';
+  btnPause.textContent = snapshot.paused ? '恢复监控' : '暂停 30 分钟';
+  btnPause.title = btnPause.textContent;
+  btnPause.setAttribute('aria-label', btnPause.textContent);
+  btnPause.setAttribute('aria-pressed', String(snapshot.paused));
+  const hint = document.getElementById('monitoring-hint');
+  if (hint) hint.textContent = snapshot.paused ? '已暂停 · 30 分钟后自动恢复' : '实时关注你的 AI 任务';
 }
 
 /* ============================================================================
@@ -273,6 +294,7 @@ function showToast(message: string): void {
   if (!toast) {
     toast = document.createElement('div');
     toast.className = 'panel-toast';
+    toast.setAttribute('role', 'status');
     document.body.appendChild(toast);
   }
   toast.textContent = message;
@@ -282,7 +304,7 @@ function showToast(message: string): void {
   }
   toastTimer = window.setTimeout(() => {
     toast?.classList.remove('show');
-  }, 3200);
+  }, Math.min(10000, Math.max(5000, message.length * 90)));
 }
 
 btnClose.addEventListener('click', () => {
@@ -290,14 +312,27 @@ btnClose.addEventListener('click', () => {
   void api?.togglePanel();
 });
 
-btnPause.addEventListener('click', () => {
-  // 全局暂停/恢复没有对应的 TaskAction（架构 §4.3 的 TaskAction 是任务级的），
-  // 统一引导到托盘菜单，保持 IPC 契约与架构一致。
-  showToast('全局暂停/恢复请使用托盘右键菜单');
+btnPause.addEventListener('click', async () => {
+  if (!api || !currentSnapshot || btnPause.disabled) return;
+  btnPause.disabled = true;
+  try {
+    const result = await api.setMonitoringPaused(!currentSnapshot.paused);
+    if (!result.ok) showToast(result.message ?? '切换监控状态失败，请重试');
+  } catch {
+    showToast('切换监控状态失败，请重试');
+  } finally {
+    btnPause.disabled = false;
+  }
 });
 
 document.addEventListener('keydown', (event: KeyboardEvent) => {
   if (event.key === 'Escape') {
+    const menus = document.querySelectorAll<HTMLDetailsElement>('details[open]');
+    if (menus.length > 0) {
+      menus.forEach(menu => { menu.open = false; });
+      event.preventDefault();
+      return;
+    }
     void api?.togglePanel();
   }
 });
@@ -311,6 +346,14 @@ async function start(): Promise<void> {
     console.error('[panel] preload 未注入 API，面板无法工作');
     return;
   }
+  // Subscribe before the ready handshake; first-open feedback cannot be lost.
+  api.onToast((req) => showToast(req.message));
+  try {
+    const pending = await api.takePanelMessage?.();
+    if (pending?.message) showToast(pending.message);
+  } catch (err) {
+    console.warn('[panel] 获取待显示提示失败', err);
+  }
   try {
     render(await api.getSnapshot());
   } catch (err) {
@@ -318,7 +361,6 @@ async function start(): Promise<void> {
   }
 
   api.onSnapshot(render);
-  api.onToast((req) => showToast(req.message));
 
   // 运行中任务每 5s 刷新一次耗时（轻量定时器，避免每秒全量重绘）
   window.setInterval(() => {

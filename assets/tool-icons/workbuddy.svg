@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#26364a" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+  <title>WorkBuddy · 小猫</title>
+  <path d="M5 9V3.5L9 6a11 11 0 0 1 6 0l4-2.5V9a7 7 0 0 1 2 5c0 4-4 6.5-9 6.5S3 18 3 14a7 7 0 0 1 2-5Z"/>
+  <circle cx="8.3" cy="11.8" r=".75" fill="#26364a" stroke="none"/>
+  <circle cx="15.7" cy="11.8" r=".75" fill="#26364a" stroke="none"/>
+  <path d="m11 14 1 1 1-1M12 15v1m0 0q-1.2 1.8-2.4.4M12 16q1.2 1.8 2.4.4M5.5 14l-3.5-1M5.5 16H2M18.5 14l3.5-1M18.5 16H22"/>
+</svg>

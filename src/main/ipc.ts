@@ -26,6 +26,9 @@ import type { Logger } from './logger';
 
 /** 业务能力集合 —— 由 index.ts 注入，避免 ipc.ts 直接依赖具体实现。 */
 export interface IpcHandlers {
+  showPanelMessage?: (message: string) => void;
+  takePanelMessage?: () => { message?: string };
+  setMonitoringPaused?: (paused: boolean) => Promise<TaskActionResponse>;
   /** 渲染层挂载时拉初始快照。 */
   getSnapshot: () => Snapshot;
   /** 任务动作（面板按钮 / 通知按钮）。 */
@@ -65,6 +68,17 @@ export function registerIpcHandlers(handlers: IpcHandlers, logger: Logger): void
   };
 
   safe(IPC.GET_SNAPSHOT, () => handlers.getSnapshot());
+  safe(IPC.SHOW_PANEL_MESSAGE, (message) => {
+    if (typeof message !== 'string' || !message.trim() || message.length > 2000) return { ok: false, message: '无效提示内容' };
+    if (!handlers.showPanelMessage) return { ok: false, message: '提示面板暂不可用' };
+    handlers.showPanelMessage(message);
+    return { ok: true };
+  });
+  safe(IPC.TAKE_PANEL_MESSAGE, () => handlers.takePanelMessage?.() ?? {});
+  safe(IPC.SET_MONITORING_PAUSED, (paused) => {
+    if (typeof paused !== 'boolean') return { ok: false, message: '暂停状态必须为布尔值' };
+    return handlers.setMonitoringPaused?.(paused) ?? { ok: false, message: '暂停功能暂不可用' };
+  });
 
   safe(IPC.TASK_ACTION, (req) => handlers.handleTaskAction(req));
 
@@ -160,7 +174,7 @@ function fallbackResponse(channel: string): unknown {
       clickThrough: false,
     } satisfies Snapshot;
   }
-  if (channel === IPC.TASK_ACTION) {
+  if (channel === IPC.TASK_ACTION || channel === IPC.SET_MONITORING_PAUSED || channel === IPC.SHOW_PANEL_MESSAGE) {
     return { ok: false, message: '主进程处理失败' } satisfies TaskActionResponse;
   }
   if (channel === IPC.NOTIFY_ACTION) {
@@ -172,5 +186,6 @@ function fallbackResponse(channel: string): unknown {
   if (channel === IPC.GET_LAYOUT) {
     return { dock: 'none' } satisfies LampLayout;
   }
+  if (channel === IPC.TAKE_PANEL_MESSAGE) return {};
   return { ok: false };
 }

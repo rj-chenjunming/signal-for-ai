@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#26364a" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+  <title>GPT / Codex · 小机器人</title>
+  <path d="M12 6V3.8"/>
+  <circle cx="12" cy="2.8" r="1"/>
+  <rect x="4.5" y="6" width="15" height="14" rx="4"/>
+  <path d="M4.5 11H2v4h2.5M19.5 11H22v4h-2.5M9 16q3 2 6 0"/>
+  <rect x="8" y="10" width="2" height="3" rx="1" fill="#26364a" stroke="none"/>
+  <rect x="14" y="10" width="2" height="3" rx="1" fill="#26364a" stroke="none"/>
+</svg>

@@ -176,12 +176,17 @@ export class OverlayWindow {
    */
   private resolveCanvasSize(): { width: number; height: number } {
     let maxHeight = 900;
+    let maxWidth = 1200;
     try {
-      maxHeight = Math.round((screen.getPrimaryDisplay?.()?.workArea.height ?? 900) * 0.7);
+      const area = this.win && !this.win.isDestroyed()
+        ? this.workAreaFor(this.win.getBounds())
+        : screen.getPrimaryDisplay?.()?.workArea;
+      maxHeight = Math.round((area?.height ?? 900) * 0.7);
+      maxWidth = Math.round((area?.width ?? 1200) * 0.9);
     } catch {
       // 无 display 信息（极早期调用/无头环境）时用保守上限
     }
-    return resolveCanvasSize(this.settings.size, this.stripTaskCount(), maxHeight, this.dock);
+    return resolveCanvasSize(this.settings.size, this.stripTaskCount(), maxHeight, this.dock, maxWidth);
   }
 
   /**

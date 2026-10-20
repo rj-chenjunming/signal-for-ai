@@ -47,6 +47,9 @@ export const IPC = Object.freeze({
    * 灯会一直停在错的形态上。启动时先拉一次，之后靠订阅跟进。
    */
   GET_LAYOUT: 'app:getLayout',
+  SET_MONITORING_PAUSED: 'app:setMonitoringPaused',
+  SHOW_PANEL_MESSAGE: 'panel:showMessage',
+  TAKE_PANEL_MESSAGE: 'panel:takeMessage',
 } as const);
 
 /** 主进程向渲染层推送的通道（M→R）。 */
@@ -76,6 +79,9 @@ export type IpcPushChannel = (typeof IPC_PUSH)[keyof typeof IPC_PUSH];
 
 /** 每个 invoke 通道的「载荷 -> 响应」映射，供 ipc.ts 与 preload 共用类型。 */
 export interface InvokeMap {
+  [IPC.SHOW_PANEL_MESSAGE]: { request: string; response: TaskActionResponse };
+  [IPC.TAKE_PANEL_MESSAGE]: { request: void; response: { message?: string } };
+  [IPC.SET_MONITORING_PAUSED]: { request: boolean; response: TaskActionResponse };
   [IPC.GET_SNAPSHOT]: { request: void; response: Snapshot };
   [IPC.TASK_ACTION]: { request: TaskActionRequest; response: TaskActionResponse };
   [IPC.LAMP_TOGGLE_PANEL]: { request: void; response: { expanded: boolean } };
@@ -100,6 +106,9 @@ export interface PushMap {
 
 /** 暴露给渲染层的全局 API 形状（preload contextBridge 白名单的契约）。 */
 export interface RendererApi {
+  showPanelMessage(message: string): Promise<TaskActionResponse>;
+  takePanelMessage(): Promise<{ message?: string }>;
+  setMonitoringPaused(paused: boolean): Promise<TaskActionResponse>;
   getSnapshot(): Promise<Snapshot>;
   /** 拉取当前浮窗布局（停靠方向）；与 onLayout 配套使用。 */
   getLayout(): Promise<LampLayout>;

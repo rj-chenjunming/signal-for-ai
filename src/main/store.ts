@@ -33,6 +33,18 @@ import type {
   TaskStatus,
 } from '../shared/types';
 
+/** UI capability metadata derives from configured routes, never from monitor messages. */
+function presentationFor(cfg: TaskConfig): Pick<TaskState, 'toolKind' | 'availableActions'> {
+  const kind = cfg.monitor.type;
+  const toolKind = kind === 'codex' ? 'codex' : kind === 'dsh' ? 'dsh'
+    : /workbuddy/i.test(`${cfg.id} ${cfg.name}`) ? 'workbuddy' : 'generic';
+  const availableActions: NonNullable<TaskState['availableActions']> = ['focus_terminal'];
+  if (cfg.jump?.logFile) availableActions.push('open_log');
+  if (cfg.jump?.cwd) availableActions.push('open_dir');
+  availableActions.push('retry', 'mark_read');
+  return { toolKind, availableActions };
+}
+
 /* ============================================================================
  * 状态机转移表（PRD §5.3 转移图 + §5.4 关键转移规则）
  * ==========================================================================*/
@@ -247,6 +259,7 @@ export class TaskStore {
       // 不要再用 paused 兼任 enabled 了（那会让"只改 enabled"同步不到）。
       enabled: cfg.enabled,
       portLabel: derivePortLabel(cfg),
+      ...presentationFor(cfg),
     };
   }
 
@@ -671,6 +684,13 @@ export class TaskStore {
       }
       if (existing.enabled !== cfg.enabled) {
         existing.enabled = cfg.enabled;
+        if (!changed.includes(cfg.id)) changed.push(cfg.id);
+      }
+      const presentation = presentationFor(cfg);
+      const portLabel = derivePortLabel(cfg);
+      if (existing.toolKind !== presentation.toolKind || existing.portLabel !== portLabel ||
+        JSON.stringify(existing.availableActions) !== JSON.stringify(presentation.availableActions)) {
+        Object.assign(existing, presentation, { portLabel });
         if (!changed.includes(cfg.id)) changed.push(cfg.id);
       }
     }

@@ -40,6 +40,7 @@ interface AiIndicatorAudio {
 
 declare global {
   interface Window {
+    aiIndicatorUi?: { icon: (kind: string) => string };
     /** preload 暴露的白名单 API（键名见 shared/ipc-contract.ts 的 IPC_GLOBAL_KEY）。 */
     aiIndicator?: RendererApi;
     /** audio.js 挂载的音效接口。 */

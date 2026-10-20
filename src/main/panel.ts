@@ -4,7 +4,7 @@
  * 依赖: `electron`（BrowserWindow / screen / nativeTheme）+ shared/*。
  *
  * 规格（PRD §7.3）：
- *  - 宽度 380px，最大高度 = 视口 70%，超出内部滚动
+ *  - SPEC-012 宽度 420 DIP，最大高度 520 DIP / 工作区 70%，超出内部滚动
  *  - 跟随系统深/浅色（nativeTheme.shouldUseDarkColors）
  *  - 无边框但**可交互**（与悬浮灯分开的原因见架构 §1.2）
  */
@@ -13,11 +13,11 @@ import { BrowserWindow, screen } from 'electron';
 import * as path from 'node:path';
 
 import type { Snapshot } from '../shared/types';
-import { IPC_PUSH } from '../shared/ipc-contract';
+import { IPC, IPC_PUSH } from '../shared/ipc-contract';
 import type { Logger } from './logger';
 
 /** PRD §7.3 面板尺寸。 */
-const PANEL_WIDTH = 380;
+const PANEL_WIDTH = 420;
 const PANEL_MAX_HEIGHT_RATIO = 0.7;
 const PANEL_MIN_HEIGHT = 200;
 
@@ -29,6 +29,8 @@ export interface PanelOptions {
 
 export class PanelWindow {
   private win: BrowserWindow | null = null;
+  private pendingMessage: string | undefined;
+  private rendererReady = false;
 
   constructor(private readonly options: PanelOptions) {}
 
@@ -39,16 +41,17 @@ export class PanelWindow {
     }
 
     const workArea = this.getWorkArea();
-    const height = Math.max(
+    const height = Math.min(520, workArea.height, Math.max(
       PANEL_MIN_HEIGHT,
       Math.floor(workArea.height * PANEL_MAX_HEIGHT_RATIO),
-    );
+    ));
+    const width = Math.min(PANEL_WIDTH, workArea.width);
     // 面板锚定在悬浮灯附近（PRD §7.2「面板以灯为锚点定位」）
-    const anchorX = workArea.x + workArea.width - PANEL_WIDTH - 24;
-    const anchorY = workArea.y + 96;
+    const anchorX = workArea.x + Math.max(0, workArea.width - width - 24);
+    const anchorY = workArea.y + Math.max(0, Math.min(96, workArea.height - height));
 
     this.win = new BrowserWindow({
-      width: PANEL_WIDTH,
+      width,
       height,
       x: anchorX,
       y: anchorY,
@@ -82,8 +85,10 @@ export class PanelWindow {
 
     this.win.on('closed', () => {
       this.win = null;
+      this.rendererReady = false;
       this.options.onClosed?.();
     });
+    this.win.webContents.on('did-start-loading', () => { this.rendererReady = false; });
 
     // 点击面板外部 -> 收起（Windows 上 blur 即视为失焦）
     this.win.on('blur', () => {
@@ -119,6 +124,23 @@ export class PanelWindow {
       win.show();
       win.focus();
     }
+  }
+
+  /** Keep feedback until the renderer has subscribed; no load-time timer race. */
+  showMessage(message: string): void {
+    this.pendingMessage = message;
+    this.show();
+    if (this.rendererReady && this.win && !this.win.isDestroyed()) {
+      this.win.webContents.send(IPC.APP_TOAST, { message });
+      this.pendingMessage = undefined;
+    }
+  }
+
+  takeMessage(): { message?: string } {
+    this.rendererReady = true;
+    const message = this.pendingMessage;
+    this.pendingMessage = undefined;
+    return message === undefined ? {} : { message };
   }
 
   /** 收起面板。 */
@@ -159,5 +181,6 @@ export class PanelWindow {
       this.win.destroy();
     }
     this.win = null;
+    this.rendererReady = false;
   }
 }
