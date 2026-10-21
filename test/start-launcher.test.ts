@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-describe('start launcher CLI contract (SPEC-009)', () => {
+describe('start launcher CLI contract (SPEC-018)', () => {
   let root: string;
 
   beforeAll(() => {

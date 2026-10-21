@@ -4,7 +4,7 @@
 > 类型：bugfix
 > 需求来源：2026-10-19 用户反馈 Codex 未被监控，进一步澄清“只有运行的时候有，一旦结束就消失了”。
 > 负责人：Codex
-> 基线：`dbca9cf` + 保留 SPEC-009 等本地未提交修改；Windows 11 / Node 24.16.0。
+> 基线：`dbca9cf` + 保留 SPEC-018（当时的 SPEC-009）等本地未提交修改；Windows 11 / Node 24.16.0。
 > 需求依据及假设：沿用已有蓝灯运行、绿灯未确认完成、确认后灰灯、默认十分钟自动确认的规则；不新增永久绿灯语义。
 > 关联/替代：替代 SPEC-002 中每轮从尾部空状态重建、所有历史 unknown 一律压过新完成的采集/聚合策略；不改变 TaskStore 非法转移与全局可见性规则。
 
@@ -53,7 +53,7 @@
 - 需求已明确，ready 不意味着额外提交/推送授权。
 - 无实现先于 Red；纯验证文档不造 Red。具体命令/退出码/工作区状态执行后补记。
 - 聚合切片修改前：`npm test -- test/codex-monitor.test.ts test/store-ack-completion.test.ts test/visibility.test.ts --maxWorkers=2 --minWorkers=1` 退出 0，47 用例通过；`logs/spec010-baseline.log`。
-- 聚合 Red：`npm test -- test/codex-monitor.test.ts --maxWorkers=2 --minWorkers=1` 退出 1，14 通过、3 新断言失败：历史未知/陈旧会话把明确完成压为 unknown、两轮间开始完成被历史噪声遮蔽、已有空闲历史允许无开始的完成洗绿。工作区是原 Codex 实现 + SPEC-009 保留修改 + 本规格/新增测试；`logs/spec010-aggregate-red.log`。均非缺依赖/编译失败。
+- 聚合 Red：`npm test -- test/codex-monitor.test.ts --maxWorkers=2 --minWorkers=1` 退出 1，14 通过、3 新断言失败：历史未知/陈旧会话把明确完成压为 unknown、两轮间开始完成被历史噪声遮蔽、已有空闲历史允许无开始的完成洗绿。工作区是原 Codex 实现 + SPEC-018（当时的 SPEC-009）保留修改 + 本规格/新增测试；`logs/spec010-aggregate-red.log`。均非缺依赖/编译失败。
 - 聚合 Green：相同 Codex/确认/可见性三文件命令退出 0，51 用例通过；`logs/spec010-aggregate-green.log`。增加本监控活跃回合跟踪，历史 unknown/启动前陈旧运行不覆盖新完成；只有携带真实开始证据的完成参与提醒。
 - 读取切片 Red（此时聚合已 Green、仍是旧尾部读取）：原 Codex 命令沙箱内退出 1，4 个有效目标断言失败，另有 Windows rename EPERM（不计 Red）。沙箱外原样重跑退出 1，19 通过、4 个目标断言失败：长正文后运行丢失、启动长文件无法恢复、追平时完成无法恢复、历史长文件完成不能归为空闲。`logs/spec010-reader-red-windows.log`；保护性的替换/停止用例通过，不伪造其 Red。
 - 读取 Green：分块游标 + 可靠观测快照，原三文件命令沙箱外退出 0，57 项通过；`logs/spec010-reader-green-windows.log`。在实现阶段发现跨块时不能先 unknown 再仅凭旧完成恢复，故让新增正文未追平时保留上次可靠观测，仍不提前发布首次扫描的历史状态。
@@ -76,4 +76,4 @@
 - [x] 本机真实运行及自然完成保留已核对；未修改的点击跳转矩阵仍单独列出。
 - [x] 文档/索引同步，本地配置与日志忽略；用户本次授权本地提交，未授权自动推送。
 
-本规格已完成，不代表三工具所有交互或发布完成。回退只恢复本规格代码并重新构建启动，不覆盖本机配置或 SPEC-009；提交引用见 Git 历史。
+本规格已完成，不代表三工具所有交互或发布完成。回退只恢复本规格代码并重新构建启动，不覆盖本机配置或 SPEC-018（当时的 SPEC-009）；提交引用见 Git 历史。

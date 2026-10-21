@@ -5,6 +5,7 @@
 | Spec ID | 文档 | 类型 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
 | BASELINE-000 | [当前基线](000-baseline.md) | 接管现状 | observed | 从当前提交核对，不补造历史 TDD |
+| SPEC-018 | [启动器配置参数转发](018-start-cli-arguments.md) | 修复 | done | 有效 Red/Green、709 项回归、Windows 指定配置启动通过；原编号 SPEC-009，2026-10-21 与 dsh 看门狗规格冲突后改为 018 |
 | SPEC-017 | [桌面工具存在时才监控](017-desktop-process-presence.md) | 修复/行为 | ready | 确认退出则停源、不红、隐藏灯行，重新出现自动恢复；保留真实故障，待Red/Green |
 | SPEC-016 | [Windows双击启动入口](016-desktop-start-script.md) | 新能力 | done | 824项/类型/构建/smoke通过；真实cmd从其他目录启动及单实例复用通过，保留配置与自动运行时回退 |
 | SPEC-015 | [WorkBuddy 恢复后可关闭到后台](015-workbuddy-native-window-reveal.md) | 修复 | done | 824项最终回归；真实自身恢复前台确认，用户确认X后台、原主PID仍在且HWND=0 |
@@ -14,7 +15,6 @@
 | SPEC-011 | [Codex 授权等待 Hook](011-codex-approval-hooks.md) | 新能力 / 修复 | done | 746 测试/构建/smoke 通过；用户信任后真实审批黄灯→匹配工具返回蓝灯 PASS |
 | SPEC-010 | [Codex 完成灯与长回合连续性](010-codex-completion-continuity.md) | 修复 | done | 722 项回归全过；真机蓝→绿连续保留 PASS，用户确认效果；点击矩阵仍归 SPEC-002 |
 | SPEC-009 | [dsh 轮询看门狗](009-dsh-poll-watchdog.md) | 修复 | verifying | 单轮挂死不静默；warn + 立即排下一轮 |
-| SPEC-009 | [启动器配置参数转发](009-start-cli-arguments.md) | 修复 | done | 有效 Red/Green、709 项回归、Windows 指定配置启动通过；与 SPEC-010 一并按用户要求本地提交 |
 | SPEC-008 | [软删除会话被当成完成](008-soft-deleted-sessions.md) | 修复 | verifying | SQL 排除 `deleted_at > 0`；老库无该列时兼容 |
 | SPEC-007 | [自动熄灭后重复亮绿](007-dismiss-reannounce.md) | 修复 | verifying | dismiss 同时确认水位；重启不为陈旧完成亮绿 |
 | SPEC-006 | [dsh 回合完成亮绿](006-dsh-turn-success.md) | 修复 / 能力补齐 | verifying | dsh 此前永不产生 success；现按回合完成推断 |
