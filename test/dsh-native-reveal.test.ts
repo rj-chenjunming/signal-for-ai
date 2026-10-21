@@ -10,6 +10,14 @@ const task: TaskConfig = { id: 'dsh', name: 'dsh', enabled: true,
 const hidden = { Id: 34092, ProcessName: 'DeepSeek Harness', MainWindowTitle: 'A task — DeepSeek Harness',
   MainWindowHandle: 527050, ClassName: 'Chrome_WidgetWin_1', Visible: false, Owner: 0, ToolWindow: false, Width: 1200, Height: 800 };
 const ok = (stdout: string): ExecResult => ({ ok: true, stdout, stderr: '', code: 0 });
+function expectGuardedRestoreOnly(script: string): void {
+  expect(script).not.toMatch(/AppActivate/u);
+  expect([...script.matchAll(/::ShowWindow\(/gu)]).toHaveLength(1);
+  expect(script).toMatch(/if \(\[LampNativeOwner\]::IsIconic\(\$nativeHandle\)\) \{\s*\[void\]\[LampNativeOwner\]::ShowWindow\(\$nativeHandle, 9\)\s*(?:Start-Sleep[^\n]*\n)?\s*\}/u);
+  expect(script.indexOf('Start-Process')).toBeLessThan(script.indexOf('IsIconic($nativeHandle)'));
+  expect(script.indexOf('IsIconic($nativeHandle)')).toBeLessThan(script.indexOf('::ShowWindow('));
+  expect(script.indexOf('::ShowWindow(')).toBeLessThan(script.indexOf('LAMPDSHREVEAL ok=True'));
+}
 function fixture(visible: boolean, reveal: ExecResult | Error = ok('LAMPDSHREVEAL ok=True'), foreground = true) {
   const exec = vi.fn(async (_cmd: string, args: string[]) => {
     const script = args.at(-1) ?? '';
@@ -27,8 +35,17 @@ it.each([false, true])('uses dsh itself to reveal the existing main window (visi
   const { service, exec, spawn } = fixture(visible);
   expect((await service.focusTerminal(task, task.jump)).ok).toBe(true);
   expect(exec.mock.calls.some(([,args])=>args.at(-1)?.includes('LAMPDSHREVEAL'))).toBe(true);
-  expect(exec.mock.calls.some(([,args])=>/::ShowWindow|AppActivate/u.test(args.at(-1) ?? ''))).toBe(false);
+  const reveal = exec.mock.calls.find(([,args])=>args.at(-1)?.includes('LAMPDSHREVEAL'))?.[1].at(-1) ?? '';
+  expectGuardedRestoreOnly(reveal);
   expect(spawn).not.toHaveBeenCalled();
+});
+
+it('restores a still-minimized dsh window after the native handoff', async () => {
+  const { service, exec } = fixture(false);
+  await service.focusTerminal(task, task.jump);
+  const script = exec.mock.calls.find(([,args])=>args.at(-1)?.includes('LAMPDSHREVEAL'))?.[1].at(-1) ?? '';
+  expect(script).toContain('IsIconic($nativeHandle)');
+  expectGuardedRestoreOnly(script);
 });
 
 it.each([
@@ -36,7 +53,9 @@ it.each([
 ])('never force-shows dsh after native reveal fails %#', async (reveal) => {
   const {service,exec}=fixture(false,reveal);
   expect((await service.focusTerminal(task,task.jump)).ok).toBe(false);
-  expect(exec.mock.calls.some(([,args])=>/::ShowWindow|AppActivate/u.test(args.at(-1) ?? ''))).toBe(false);
+  const script=exec.mock.calls.find(([,args])=>args.at(-1)?.includes('LAMPDSHREVEAL'))?.[1].at(-1) ?? '';
+  // The guarded restore sits after the handoff checks, so a failed handoff never shows the window.
+  expect(script.indexOf('::ShowWindow(')).toBeGreaterThan(script.indexOf('$relay.WaitForExit'));
 });
 
 it('does not report success without foreground confirmation', async () => {

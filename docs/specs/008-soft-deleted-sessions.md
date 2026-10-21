@@ -63,3 +63,23 @@
 - [ ] 真机：静置观察 WorkBuddy 不再自发亮绿（用户确认项）。
 
 最终结果：软删除会话不再参与状态判定，删除操作不会再点亮绿灯。未提交、未发布。
+
+### 2026-10-21 15:24 真库只读复核（完全权限）
+
+- `node scripts/sqlite-monitor-check.mjs 'D:/wb_data/.workbuddy/workbuddy.db'`：16 项全部通过，`logs/spec008-sqlite-check.log`。真库 `totalCount=51`、`lastDoneAt=1792565742300`；确认水位演示：未确认→`success`、已确认同一完成→`idle`、更晚完成→`success`。
+- 直接对比软删除过滤（`logs/spec008-soft-deleted-check.cjs`、`.log`）：`deleted_at` 列存在；`completed` 共 58 条，其中未删除 50 条、软删除 8 条、`deleted_at=-1` 哨兵 3 条。软删除行的最大 `updated_at` 为 `1792552075265`，早于未删除行的 `1792565742300`；因此本次采样下未过滤 SQL 恰好也会取到未删除水位（`unfilteredWouldUseNewerWatermark=false`），但过滤确实排除了 8 条软删除行，AC-01/02/03 的语义在真库上成立。
+- 全量 851 项、typecheck/build/smoke 全绿（`logs/spec020-*.log`）。
+- 仍保持 `verifying`：用户侧“静置观察不再自发亮绿”的时序观感未确认；本次真库采样只能证明过滤语义，不冒充 20 分钟以上的观察结论。
+
+### 2026-10-21 16:13 真库复核（新完成，不是软删除幽灵）
+
+- 真库 `completed` 共 58 条：未删除 50 条、软删除 8 条、`deleted_at=-1` 哨兵 3 条。
+- 最新未删除完成 `max(updated_at)=1792570330301`（2026-10-21 16:12:10），软删除行最大 `updated_at=1792552075265`（更早）；当前面板 WorkBuddy“已完成”来自真实新完成，不是软删除会话被当成完成。
+- 仍待静置观察（SPEC-007 的 16:22 自动熄灭复核一并覆盖）；不因这次真实完成把本规格标 done。
+
+### 2026-10-21 16:25 复核（真实活动解释了绿灯）
+
+- 最新会话 `f315adfb`（`is_playground=1`）在 `completed` 与 `working` 间切换，`updated_at` 与 `last_activity_at` 同步前进；16:22 的绿灯对应真实完成/活动，不是软删除行被当成完成。
+- 软删除行（8 条）最大 `updated_at` 仍为 `1792552075265`（早于最新未删除完成），过滤语义未回退。
+- 要证明“无新完成时不自发亮绿”，需要 WorkBuddy 静置 ≥20 分钟的干净窗口；当前 WorkBuddy 有活动，不能据此闭环。状态保持 `verifying`。
+- 2026-10-21 16:30 用户明确选择**跳过**该静置观察。本规格不记为通过或失败；软删除过滤与真库语义证据保留，时序观感项如实保持未验收。

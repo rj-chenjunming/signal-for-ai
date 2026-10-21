@@ -736,26 +736,41 @@ export class FocusService {
         await this.refreshWindows();
         win = this.findWindowByTitle(title, terminal.processNames);
       }
-      if (win === null && terminal.type === 'windowProcess') {
-        win = await this.findHiddenWindow(terminal.processNames, title);
+      // SPEC-020：windowTitle 目标声明了 processNames 时，同样允许只读查找隐藏主窗口；
+      // 没有 processNames 的纯标题目标仍不查（避免误激活浏览器/辅助窗口）。
+      const hiddenLookupProcessNames = terminal.processNames && terminal.processNames.length > 0
+        ? terminal.processNames
+        : undefined;
+      let hiddenCandidate = false;
+      if (win === null && hiddenLookupProcessNames) {
+        win = await this.findHiddenWindow(hiddenLookupProcessNames, title);
+        hiddenCandidate = win !== null;
       }
-      const activate = (candidate: TerminalWindow): Promise<boolean> => {
-        if (terminal.type === 'windowProcess') {
-          const name = normalizeProcessName(candidate.processName);
+      const declaredProcessNames = (terminal.processNames ?? []).map(normalizeProcessName);
+      const activate = (candidate: TerminalWindow, fromHidden: boolean): Promise<boolean> => {
+        const name = normalizeProcessName(candidate.processName);
+        // SPEC-020：windowProcess 目标保持原行为；windowTitle 目标只在“隐藏窗口”场景
+        // 才按进程身份走自身单实例恢复。可见/最小化的 windowTitle 窗口继续用 Win32，
+        // 避免把本来能抢到前台的可见窗口交给 handoff 后反而前台确认失败（真机回归）。
+        const useNative = declaredProcessNames.includes(name) &&
+          (terminal.type === 'windowProcess' || fromHidden);
+        if (useNative) {
           if (name === 'workbuddy') return this.revealNativeWindow(candidate, 'workbuddy');
           if (name === 'deepseek harness' && task.monitor.type === 'dsh') return this.revealNativeWindow(candidate, 'dsh');
         }
         return this.focusExistingWindow(candidate);
       };
-      let activated = win !== null && await activate(win);
+      let activated = win !== null && await activate(win, hiddenCandidate);
       if (win !== null && !activated) {
         const oldHwnd = win.hwnd;
         await this.refreshWindows();
         win = this.findWindowByTitle(title, terminal.processNames);
-        if (win === null && terminal.type === 'windowProcess') {
-          win = await this.findHiddenWindow(terminal.processNames, title);
+        hiddenCandidate = false;
+        if (win === null && hiddenLookupProcessNames) {
+          win = await this.findHiddenWindow(hiddenLookupProcessNames, title);
+          hiddenCandidate = win !== null;
         }
-        if (win !== null && win.hwnd !== oldHwnd) activated = await activate(win);
+        if (win !== null && win.hwnd !== oldHwnd) activated = await activate(win, hiddenCandidate);
       }
       if (activated && win !== null) {
         return { ok: true, level: FOCUS_LEVELS.WINDOW_FOCUS, detail: `已切到窗口「${win.title || win.processName}」` };

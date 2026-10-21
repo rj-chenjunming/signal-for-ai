@@ -404,6 +404,56 @@ describe('deriveSessionStatus —— 优先级与语义', () => {
         ).toBe('idle');
       });
     });
+
+    describe('SPEC-021 活信号：长回合超过 10 分钟仍保持 running', () => {
+      it('AC-01 updatedAt 陈旧但活信号新鲜 → running', () => {
+        expect(
+          deriveSessionStatus({
+            running: true,
+            agentAvailable: true,
+            now: NOW,
+            updatedAt: NOW - 20 * 60_000,
+            lastLiveSignalAt: NOW - 5_000,
+          }),
+        ).toBe('running');
+      });
+
+      it('AC-02 updatedAt 与活信号都陈旧 → idle（保留防常蓝）', () => {
+        expect(
+          deriveSessionStatus({
+            running: true,
+            agentAvailable: true,
+            now: NOW,
+            updatedAt: NOW - 20 * 60_000,
+            lastLiveSignalAt: NOW - 601_000,
+          }),
+        ).toBe('idle');
+      });
+
+      it('AC-03 未来时间戳不能延长蓝灯 → idle', () => {
+        expect(
+          deriveSessionStatus({
+            running: true,
+            agentAvailable: true,
+            now: NOW,
+            updatedAt: NOW - 20 * 60_000,
+            lastLiveSignalAt: NOW + 3_600_000,
+          }),
+        ).toBe('idle');
+      });
+
+      it('AC-03 非法的活信号时间戳被忽略 → idle', () => {
+        expect(
+          deriveSessionStatus({
+            running: true,
+            agentAvailable: true,
+            now: NOW,
+            updatedAt: NOW - 20 * 60_000,
+            lastLiveSignalAt: Number.NaN,
+          }),
+        ).toBe('idle');
+      });
+    });
   });
 
   it('errorMessage 一票否决：即使同时在等授权也判 failed', () => {

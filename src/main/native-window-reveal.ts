@@ -13,9 +13,10 @@ export function buildNativeWindowRevealScript(pid: number, hwnd: number, app: Na
   }
   return `
 $ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class LampNativeOwner { [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); }'
+Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class LampNativeOwner { [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd); }'
 [uint32]$ownerPid = 0
-[void][LampNativeOwner]::GetWindowThreadProcessId([IntPtr]${hwnd}, [ref]$ownerPid)
+$nativeHandle = [IntPtr]${hwnd}
+[void][LampNativeOwner]::GetWindowThreadProcessId($nativeHandle, [ref]$ownerPid)
 if ($ownerPid -ne ${pid}) { throw '${profile.label} window owner changed' }
 $targetProcess = Get-Process -Id ${pid} -ErrorAction Stop
 if ($targetProcess.ProcessName -ine '${profile.processName}' -or $targetProcess.HasExited) { throw '${profile.label} owner is unavailable' }
@@ -25,6 +26,10 @@ $relay = Start-Process -FilePath $executable -WorkingDirectory ([IO.Path]::GetDi
 try {
   if (!$relay.WaitForExit(3000)) { throw '${profile.label} single-instance handoff timed out' }
   if ($relay.ExitCode -ne 0) { throw '${profile.label} single-instance handoff failed' }
+  if ([LampNativeOwner]::IsIconic($nativeHandle)) {
+    [void][LampNativeOwner]::ShowWindow($nativeHandle, 9)
+    Start-Sleep -Milliseconds 120
+  }
   Write-Output '${profile.marker}'
 } finally {
   $relay.Dispose()

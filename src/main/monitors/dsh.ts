@@ -29,6 +29,7 @@ import { MonitorAdapter, type MonitorContext } from './base';
 import {
   DshClient,
   deriveFromListItem,
+  liveSignalFingerprint,
   readSigningSecret,
   type DshAuthErrorCode,
   type DshSessionListItem,
@@ -241,6 +242,15 @@ export class DshMonitor extends MonitorAdapter {
   /** 每个会话的最近状态，供面板逐会话展示（D6）。 */
   private readonly sessionStatuses = new Map<string, TaskStatus>();
 
+  /**
+   * SPEC-021：每个会话上一轮的投影活信号指纹与最近活跃时刻。
+   *
+   * 只在 `running===true` 时记录；指纹变化说明长回合仍在推进，把本地
+   * `now` 记为最近活跃，供 `deriveFromListItem` 延长 running。
+   */
+  private readonly liveSignalFingerprints = new Map<string, string>();
+  private readonly lastLiveSignalAt = new Map<string, number>();
+
   constructor(ctx: MonitorContext, options: DshMonitorOptions) {
     super(ctx);
     if (ctx.task.monitor.type !== 'dsh') {
@@ -273,6 +283,8 @@ export class DshMonitor extends MonitorAdapter {
     this.baselineCaptured = false;
     this.pendingCompletionAt = undefined;
     this.lastEmitted = undefined;
+    this.liveSignalFingerprints.clear();
+    this.lastLiveSignalAt.clear();
 
     // 立即跑一轮：不要把首次判定推迟一个轮询间隔（否则灯会先灰一下）
     void this.pollOnce();
@@ -292,6 +304,8 @@ export class DshMonitor extends MonitorAdapter {
       this.pollTimer = null;
     }
     this.client = null;
+    this.liveSignalFingerprints.clear();
+    this.lastLiveSignalAt.clear();
   }
 
   /**
@@ -443,6 +457,38 @@ export class DshMonitor extends MonitorAdapter {
     }
   }
 
+  /**
+   * SPEC-021：跟踪单个会话的轮询活信号。
+   *
+   * 首轮只建立指纹（不凭首次观察延长 running，避免陈旧 running 直接续命
+   * 一个 10 分钟窗口）；之后指纹变化才记 `now`。`running=false` 时清空。
+   */
+  private trackLiveSignal(
+    sessionId: string,
+    item: DshSessionListItem,
+    now: number,
+  ): number | undefined {
+    if (item.running !== true) {
+      if (sessionId !== '') {
+        this.liveSignalFingerprints.delete(sessionId);
+        this.lastLiveSignalAt.delete(sessionId);
+      }
+      return undefined;
+    }
+    if (sessionId === '') {
+      return undefined;
+    }
+    const fingerprint = liveSignalFingerprint(item);
+    const previous = this.liveSignalFingerprints.get(sessionId);
+    let last = this.lastLiveSignalAt.get(sessionId);
+    if (previous !== undefined && previous !== fingerprint) {
+      last = now;
+      this.lastLiveSignalAt.set(sessionId, now);
+    }
+    this.liveSignalFingerprints.set(sessionId, fingerprint);
+    return last;
+  }
+
   /** 成功一轮：逐会话判定 → 聚合 → 上报。 */
   private recordSuccess(items: readonly DshSessionListItem[], now: number): DshPollOutcome {
     this.failureCount = 0;
@@ -459,8 +505,10 @@ export class DshMonitor extends MonitorAdapter {
       const sessionId = item.sessionId ?? '';
 
       // ① 先算**轮询侧**状态（只用 session/list 拿得到的信息）
+      const liveSignalAt = this.trackLiveSignal(sessionId, item, now);
       const polled = deriveFromListItem(item, now, {
         allowPlanPendingHeuristic: this.cfg.allowPlanPendingHeuristic,
+        ...(liveSignalAt !== undefined ? { liveSignalAt } : {}),
       });
 
       // ② 再叠加插件的**精确**信号（D2 仲裁）。

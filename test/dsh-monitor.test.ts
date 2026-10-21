@@ -289,6 +289,54 @@ describe('DshMonitor —— 轮询与状态上报', () => {
     await monitor.stop();
   });
 
+  it('SPEC-021: updatedAt 陈旧但投影活信号推进 → running', async () => {
+    const base = Date.now();
+    const stale = base - 20 * 60_000;
+    const projections = (seq: number) => ({
+      asOfSeq: seq,
+      values: {
+        plan: { active: false, pending: false },
+        subagentCatalog: [],
+        tokenUsage: { uncachedInputTokens: seq, outputTokens: seq },
+        sessionStats: { turns: 1 },
+      },
+    });
+    await fake.okSessions([
+      sessionItem({ sessionId: 's1', running: true, updatedAt: stale, projections: projections(1) }),
+    ]);
+    const monitor = makeMonitor();
+    await monitor.pollOnce(base - 60_000);
+    expect(recording.lastStatus()).toBe('idle');
+
+    await fake.okSessions([
+      sessionItem({ sessionId: 's1', running: true, updatedAt: stale, projections: projections(2) }),
+    ]);
+    await monitor.pollOnce(base);
+    expect(recording.lastStatus()).toBe('running');
+    await monitor.stop();
+  });
+
+  it('SPEC-021: 活信号停滞 → 仍按 10 分钟上限转 idle', async () => {
+    const base = Date.now();
+    const stale = base - 20 * 60_000;
+    const projections = {
+      asOfSeq: 7,
+      values: {
+        plan: { active: false, pending: false },
+        subagentCatalog: [],
+        tokenUsage: { uncachedInputTokens: 7, outputTokens: 7 },
+        sessionStats: { turns: 1 },
+      },
+    };
+    await fake.okSessions([sessionItem({ sessionId: 's1', running: true, updatedAt: stale, projections })]);
+    const monitor = makeMonitor();
+    await monitor.pollOnce(base - 60_000);
+    await fake.okSessions([sessionItem({ sessionId: 's1', running: true, updatedAt: stale, projections })]);
+    await monitor.pollOnce(base);
+    expect(monitor.sessionBreakdown.get('s1')).toBe('idle');
+    await monitor.stop();
+  });
+
   it('空白会话被跳过，不计入会话数', async () => {
     await fake.okSessions([
       sessionItem({ sessionId: 'real' }),

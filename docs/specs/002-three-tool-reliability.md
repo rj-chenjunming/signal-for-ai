@@ -115,3 +115,13 @@ npm test -- test/store.test.ts test/store-extra.test.ts test/store-ack-completio
 新增 `monitor.type: codex` 与 `terminal.type: windowProcess`；SQLite 增加明确完成/等待/失败值映射。旧配置仍可解析，但“任意非工作状态亮绿”和“无目标盲抢终端”的旧行为按本规格收紧。现有浮窗隐藏失败/失联、点击完成与跳转独立、URL/显式 spawn、主进程统一写状态均保留。
 
 源码、测试、示例和流程文档作为本次 Git 同步内容，用户已授权提交并推送；提交标识以 Git 历史为准，应用尚未发布。Windows 前台锁、进程名、各工具真实数据格式、等待信号与 toast 可见性须按桌面指南验收，SPEC-002 因此保持 verifying。todo 已进入索引的低优先级清单，没有开始实现。
+
+### 2026-10-21 真机点击路径补验（dsh/WorkBuddy）
+
+- 环境：Windows 10.0.26200、Electron 33.4.11、最终构建（含 SPEC-020）；指示灯主进程 7956。
+- dsh 点击：真实点击悬浮灯 dsh 行（15:45）与面板 dsh「切回工具」（15:38）均产生 `聚焦请求：任务 dsh-local`，日志 `已通过 Win32 激活窗口`，只读前台 `Foreground=460928 (DeepSeek Harness)`；侧边图标与面板两条入口一致。
+- WorkBuddy 点击：最小化后经真实 `FocusService`（同点击后端）恢复并确认前台（`logs/spec020-real-verify.log`）；其窗口进程/连接仍为 WorkBuddy。
+- 自动化基线：15:33 全量 58 文件 852 项通过、typecheck/build/smoke 全绿（SPEC-020 §7）。
+- 16:15 用户真机确认：托盘图标菜单、完成/失败通知、点击反馈 toast 表现正常（回复“都正常”）。这与 dsh/WorkBuddy 的点击路径一起补上了桌面交互的主要可见项。
+- Codex 环境核查（16:26）：本机无 `Codex.exe`/`ChatGPT.exe` 进程，`%USERPROFILE%\.codex\sessions` 不存在；AC-05/AC-06 的 Codex 真实桌面数据面无法在本机执行（协议 fixture/临时 JSONL 测试已通过）。这属于缺环境，不是产品失败，保持 `verifying` 并如实披露。
+- 仍保持 verifying：Codex 实际窗口切换/Codex 桌面数据面、通知失败分支、多工具并行状态矩阵未在本轮执行；不把 dsh/WorkBuddy 两条点击路径与托盘/toast 确认扩大为三工具全矩阵。

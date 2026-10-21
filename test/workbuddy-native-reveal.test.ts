@@ -10,6 +10,14 @@ const task: TaskConfig={id:'workbuddy',name:'WorkBuddy',enabled:true,
 const window={Id:15320,ProcessName:'WorkBuddy',MainWindowTitle:'WorkBuddy',MainWindowHandle:198210,
   ClassName:'Chrome_WidgetWin_1',Visible:false,Owner:0,ToolWindow:false,Width:1200,Height:800};
 const ok=(stdout:string):ExecResult=>({ok:true,stdout,stderr:'',code:0});
+function expectGuardedRestoreOnly(script:string):void{
+  expect(script).not.toMatch(/AppActivate/u);
+  expect([...script.matchAll(/::ShowWindow\(/gu)]).toHaveLength(1);
+  expect(script).toMatch(/if \(\[LampNativeOwner\]::IsIconic\(\$nativeHandle\)\) \{\s*\[void\]\[LampNativeOwner\]::ShowWindow\(\$nativeHandle, 9\)\s*(?:Start-Sleep[^\n]*\n)?\s*\}/u);
+  expect(script.indexOf('Start-Process')).toBeLessThan(script.indexOf('IsIconic($nativeHandle)'));
+  expect(script.indexOf('IsIconic($nativeHandle)')).toBeLessThan(script.indexOf('::ShowWindow('));
+  expect(script.indexOf('::ShowWindow(')).toBeLessThan(script.indexOf('LAMPWORKBUDDYREVEAL ok=True'));
+}
 function fixture(visible:boolean,reveal:ExecResult|Error=ok('LAMPWORKBUDDYREVEAL ok=True'),foreground=true,exists=true){
   const exec=vi.fn(async(_cmd:string,args:string[])=>{
     const script=args.at(-1)??'';
@@ -31,15 +39,24 @@ it.each([true,false])('uses WorkBuddy own entry for the matching existing window
   expect(script).toContain('[IntPtr]198210');
   expect(script).toContain('$ownerPid -ne 15320');
   expect(script.indexOf('$ownerPid -ne 15320')).toBeLessThan(script.indexOf('Start-Process'));
-  expect(exec.mock.calls.some(([,args])=>/::ShowWindow|AppActivate/u.test(args.at(-1)??''))).toBe(false);
+  expectGuardedRestoreOnly(script);
   expect(spawn).not.toHaveBeenCalled();
+});
+it('restores a still-minimized WorkBuddy window after the native handoff',async()=>{
+  const {service,exec}=fixture(false);
+  await service.focusTerminal(task,task.jump);
+  const script=exec.mock.calls.find(([,args])=>args.at(-1)?.includes('LAMPWORKBUDDYREVEAL'))?.[1].at(-1)??'';
+  expect(script).toContain('IsIconic($nativeHandle)');
+  expect(script.indexOf('Start-Process')).toBeLessThan(script.indexOf('IsIconic($nativeHandle)'));
+  expectGuardedRestoreOnly(script);
 });
 it.each([{ok:false,stdout:'',stderr:'timeout',code:null},ok('LAMPWORKBUDDYREVEAL ok=False'),new Error('blocked')])('fails closed for unavailable native reveal %#',async reveal=>{
   const {service,exec}=fixture(false,reveal);
   const result=await service.focusTerminal(task,task.jump);
   expect(result.ok).toBe(false);
   expect(result.detail).toContain('未能切回 WorkBuddy');
-  expect(exec.mock.calls.some(([,args])=>/::ShowWindow|AppActivate/u.test(args.at(-1)??''))).toBe(false);
+  const script=exec.mock.calls.find(([,args])=>args.at(-1)?.includes('LAMPWORKBUDDYREVEAL'))?.[1].at(-1)??'';
+  expect(script.indexOf('::ShowWindow(')).toBeGreaterThan(script.indexOf('$relay.WaitForExit'));
 });
 it('requires foreground confirmation after the client exits',async()=>{
   const {service}=fixture(false,ok('LAMPWORKBUDDYREVEAL ok=True'),false);

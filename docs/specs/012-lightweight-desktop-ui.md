@@ -1,6 +1,6 @@
 # SPEC-012：轻量桌面 UI 与面板操作
 
-> 状态：verifying
+> 状态：done
 > 日期：2026-10-20
 > 基线：13c6a98 + 已验收但未提交的 SPEC-011 工作区；保留全部改动。
 > 来源：用户认为 UI 粗糙，明确选择同时优化悬浮灯和面板、精致轻量风格、贴边图标＋状态点、统一简约图标、同时整理交互，并要求继续。
@@ -86,3 +86,18 @@
 本切片仅替换静态 SVG 路径，视为纯视觉素材调整；TDD 不适用，不补造 Red。类型检查 exit 0（`logs/icons-typecheck.log`）、全量 45 文件 / 755 项 exit 0（`logs/icons-full-test.log`，20:09:57）、构建 exit 0（`logs/icons-build.log`），构建后 smoke exit 0（`logs/icons-smoke.log`）、22 场景 Electron 渲染 exit 0（`logs/icons-render.log`）。已查看深浅色实际渲染，新路径用 currentColor 跟随主题。
 
 正常退出旧实例并确认调试端口关闭后，使用原 config.local.yaml 重新启动唯一实例（`logs/icons-runtime.log`），保留监控/配置/Hook。运行快照与悬浮灯截图记录为 `logs/icons-final-runtime.json`、`logs/icons-live-overlay.png`。原 DPI/托盘/多屏待验收项继续保留，未提交或推送。
+
+### 2026-10-21 15:38–15:44 真机 GUI 复验（完全权限）
+
+- 环境：最终构建（SPEC-020 修复后），指示灯主进程 7956；Windows 10.0.26200、Electron 33.4.11。
+- 真实点击悬浮灯总灯（坐标 3820,137）→ 应用日志 `任务列表面板已创建（420x520）`；面板窗口标题 `AI 任务指示灯 — 任务列表`，截图 `logs/spec012-live-panel.png` 显示 dsh（本地客户端）、dsh（web 13080）及各自图标/状态/「切回工具」。
+- 真实点击面板 dsh「切回工具」→ 日志 `聚焦请求：任务 dsh-local`、`已通过 Win32 激活窗口「… — DeepSeek Harness」`；只读前台探针 `Foreground=460928 (DeepSeek Harness)`，面板按设计在失焦后自动收起。
+- 面板「暂停 30 分钟」→ 日志 `监控已暂停（30 分钟）`；再次点击「恢复监控」→ 日志 `监控已恢复`；悬浮灯尺寸随任务可见数在 52×168/52×131 间调整，未残留暂停状态。
+- 工具：真实鼠标点击用 `logs/click.ps1`，按钮操作用 `logs/postclick.ps1`（向窗口投递 WM_LBUTTONDOWN/UP，不依赖桌面焦点）；窗口枚举/截图见 `logs/enum-electron-windows.ps1`、`logs/capture-rect.ps1`。
+- 仍保持 verifying：多屏/DPI、原生拖拽三个边缘、托盘目视、Codex/WorkBuddy 实际窗口切换矩阵未在本轮覆盖。
+
+### 2026-10-21 16:15 用户真机确认（收口）
+
+- 用户把悬浮灯拖到屏幕左/上/右边缘并观察停靠、悬浮灯/面板表现（含多屏/DPI）：回复“都正常”。
+- 结合 15:38–15:44 的真实点击面板、dsh「切回工具」、暂停/恢复，以及 15:18 `check:ui` 24 个渲染场景、几何单测与全量 852 项，AC-01～AC-06 均满足。
+- 本规格状态改为 `done`。托盘/通知/toast 的确认记在 [SPEC-002](002-three-tool-reliability.md) 的真机记录中；Codex 实际窗口矩阵仍归 SPEC-002，不并入本规格。

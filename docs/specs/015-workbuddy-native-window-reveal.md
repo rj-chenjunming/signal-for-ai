@@ -1,6 +1,6 @@
 # SPEC-015：WorkBuddy 恢复后可以正常关闭到后台
 
-> 状态：done
+> 状态：done（2026-10-21 16:06 经 SPEC-020 补验最小化场景并获用户确认，恢复 done；原 done 证据保留）
 > 类型：bugfix
 > 需求来源：2026-10-21 用户反馈 WorkBuddy 也与此前 dsh 相同，恢复后不能关闭到后台。
 > 负责人：Codex
@@ -24,10 +24,10 @@
 
 | ID | Given | When | Then |
 | --- | --- | --- | --- |
-| AC-01 | WorkBuddy可见/隐藏且与配置匹配 | 图标/面板切回 | 同一真实可执行文件单实例恢复，不执行ShowWindow/AppActivate；原 HWND 前台确认后才成功 |
+| AC-01 | WorkBuddy可见/隐藏且与配置匹配 | 图标/面板切回 | 同一真实可执行文件单实例恢复，不执行ShowWindow/AppActivate；原 HWND 前台确认后才成功。**SPEC-020 修订**：目标最小化（`IsIconic=true`）时，handoff 后允许一次 `SW_RESTORE` 兜底；隐藏窗口仍禁止 ShowWindow；命中配置 `processNames` 的 WorkBuddy 目标不要求 `terminal.type: windowProcess` |
 | AC-02 | 缺窗口、查询异常、归属/路径验证失败、客户端超时/失败、前台未确认 | 请求恢复 | 明确失败或原配置降级，不假成功/误激活/强行显示/拉起未运行工具 |
 | AC-03 | dsh或其他明确桌面目标 | 请求切回 | dsh保持自身恢复；非白名单仍保留Win32/PID保护 |
-| AC-04 | 本机WorkBuddy已有主进程 | 新版图标恢复后点X，再查窗口/进程 | X隐藏到后台、原进程仍在、无客户端常驻；以原生操作或用户明确确认记录，不以mock替代 |
+| AC-04 | 本机WorkBuddy已有主进程 | 新版图标恢复后点X，再查窗口/进程 | X隐藏到后台、原进程仍在、无客户端常驻；以原生操作或用户明确确认记录，不以mock替代。2026-10-21 16:06 用户确认最小化恢复后 X 回后台 |
 
 ## 4. 方案与任务切片
 
@@ -55,3 +55,23 @@
 - 本次未自动提交/推送，指示灯保持运行；相关真机条件未通过前不标done。
 - 08:48桌面读取恢复；随后打开已安装WorkBuddy准备补验收。一次自动点击未触发WorkBuddy请求，改用坐标后实际日志落在相邻Codex请求，未把这次误切算成WorkBuddy恢复成功；立即停止自动点击，并明确告知用户坐标偏差，改由用户确认。已发出“点击小猫切回后点X能否后台”的问题，仍待答复。当前WorkBuddy主PID15820/HWND67422，未关闭其任务或改数据；共享代码随SPEC-016最终824项回归通过。
 - 验收补齐：用户明确回复“可以正常关闭到后台”，替代前条待答复状态。08:52:55.875真实WorkBuddy聚焦请求、08:52:58.334应用日志确认“WorkBuddy 自身恢复成功，前台 HWND 已确认”；随后只读核对原主PID15820仍为WorkBuddy、MainWindowHandle=0，X确实隐藏窗口而非退出主进程。没有把自动误切记作成功。AC-04得到真实应用日志＋用户关闭确认＋元数据佐证，本规格标done，其他Spec的平台矩阵不扩大。
+
+> **2026-10-21 追加（原 done 结论；现因最小化盲区退回 verifying）**：在 SPEC-014 的真机验收中发现，dsh 窗口**最小化**后点图标/面板无法恢复。`workbuddy` 与 `dsh` 共用 `focus.ts` 的 `revealNativeWindow()` 分支、共用 `native-window-reveal.ts` 的单实例 handoff 脚本，该脚本**没有任何 `IsIconic`/`ShowWindow(SW_RESTORE)` 兜底**。因此本规格的 done 只覆盖「X 隐藏 → 恢复」，**最小化场景属于当时未纳入验收的盲区**，同一缺陷在 WorkBuddy 上应视为存在，需随修复规格一并复验。根因与修复方向见 [SPEC-014 的 2026-10-21 记录](014-dsh-native-window-reveal.md)。
+
+### 2026-10-21 15:21 盲区修复与复验（SPEC-020）
+
+- 修复：[SPEC-020](020-window-reveal-hidden-minimized.md) 给共享的 `buildNativeWindowRevealScript` 增加 handoff 后 `IsIconic` 守卫下的 `SW_RESTORE`；`windowProcess` 的 WorkBuddy 保持该原生恢复，`windowTitle`＋`processNames` 只有**隐藏候选**才走原生（可见/最小化继续 Win32，避免可见窗口前台回归）。
+- 真机（`logs/spec020-real-verify.log`）：WorkBuddy 最小化（`IsIconic=true`）→ `focusTerminal(workbuddy)` 返回 `ok:true`，日志 `WorkBuddy 自身恢复成功，前台 HWND 已确认`，窗口 `Visible=true`、`Iconic=false`；结束后恢复为最小化。独立探针可能被远端桌面/微信抢焦点，不作为产品失败。
+- 逻辑层：`test/workbuddy-native-reveal.test.ts` 12/12（含最小化 restore 用例）、`test/focus-hidden-window.test.ts` 覆盖 hidden windowTitle 身份路由与可见窗口回归；全量 852 项、typecheck/build/smoke 全绿。
+- 状态仍为 `verifying`：最小化恢复已真机通过，但“恢复后再点 X 能隐藏到后台”需要用户在修复后的指示灯上确认一次；确认后按 DoD 收状。
+
+### 2026-10-21 16:06 用户真机确认（收口）
+
+- 用户确认 WorkBuddy 最小化后点悬浮灯小猫图标可恢复前台，随后点 X 仍能隐藏到后台，回复“两项都正常（恢复 + X 后台）”。
+- 结合此前 X 隐藏恢复、最小化真机、隔离夹具与全量 852 项证据，AC-01～AC-04 均满足；本规格恢复为 `done`。
+
+### 2026-10-21 15:58 隔离 Electron 夹具端到端补验（不触碰真实 WorkBuddy）
+
+- 用真实 Electron 进程（临时硬链接 `WorkBuddy.exe`、独立 userData、唯一标题 `LampSpec020Fixture`、close→hide、second-instance→show/focus）模拟 WorkBuddy 生命周期，进程名/可执行文件名与生产白名单一致。
+- 自隐藏后 `FocusService`（windowTitle＋processNames）→ 隐藏窗口查到 → 单实例 handoff → 日志 `WorkBuddy 自身恢复成功，前台 HWND 已确认`，结果 `ok:true`、窗口恢复；再最小化 → Win32 恢复。`logs/spec020-fixture-hidden-verify.log`，`SUMMARY failures=0`。
+- 真实 WorkBuddy 进程/数据未被触碰。状态保持 `verifying`：最终仍以用户在真实 WorkBuddy 上的 X/最小化点击确认为准。

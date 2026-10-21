@@ -1,6 +1,6 @@
 # SPEC-013：桌面跳转失败与窄灯条反馈
 
-> 状态：verifying
+> 状态：done
 > 类型：bugfix
 > 需求来源：2026-10-20 用户截图：点击 dsh 图标后显示逐字竖排的 cwd/logFile/聚焦失败提示。
 > 负责人：Codex
@@ -47,6 +47,8 @@
 需求来源：用户再次截图确认“最小化之后的 dsh 找不到”。本机只读枚举证实 dsh 主进程仍在，所有 `MainWindowHandle=0`，而 `EnumWindows` 仍找到 HWND 527050：隐藏、非最小化、无 owner、非工具窗口、1296×828、`Chrome_WidgetWin_1`，标题含 DeepSeek Harness。此前“刷新可见窗口后成功”只证明普通窗口路径；不能解决本次后台隐藏状态。此证据替代“具体为何缺失未确认”的当前状态，历史记录保留。
 
 追加范围：仅在显式 `windowProcess` 目标缺失时只读枚举该配置进程的顶层窗口；唯一满足主窗口约束的隐藏 Electron 窗口才交给既有 Win32 恢复和前台 HWND 确认。标题没有显式 `titleContains` 时必须包含进程品牌名；不激活浏览器、工具窗口、空标题、owned 窗口、非法句柄或多个有歧义的候选。保留原配置、URL 路径、目录/日志降级，不启动或结束 dsh，不改变工具数据/认证、不修改系统权限。仅支持上述可辨认的隐藏 Electron 主窗口，不保证所有工具的托盘实现。查询无常驻进程/订阅；异常、超时、进程退出与畸形结果失败关闭，不沿用旧隐藏 HWND。每次重试重新查询。
+
+> **2026-10-21 由 [SPEC-020](020-window-reveal-hidden-minimized.md) 修订**：实际 `config.local.yaml` 的 dsh 任务使用 `windowTitle`＋`processNames`，按本条范围不会查隐藏窗口，导致用户“最小化”（dsh 实际是隐藏）后无法切回。SPEC-020 将隐藏查找触发条件扩展为“`windowTitle` 也声明了 `processNames`”，并把命中的 dsh/WorkBuddy 窗口改走各自单实例恢复；无 `processNames` 的纯标题目标仍不启用隐藏搜索（AC-06 保持）。
 
 | ID | Given / When | Then / 验证计划 |
 | --- | --- | --- |
@@ -103,3 +105,17 @@
 ### 本地 Git 交付（2026-10-20）
 
 用户明确要求“先提交一版到git上”，授权将已验证的 SPEC-011/012/013、简笔图素材及相关测试/文档一起保存为本地提交。此授权替代前述不自动提交的限制；没有推送授权。本轮不再改变已验证的产品代码，提交前核对 761 项全量测试、24 项渲染、类型检查、构建和 smoke 证据及差异空白检查。本地配置/备份、日志、Hook 事件、工具数据、依赖和构建产物继续排除；SPEC-012/013 的 verifying 状态与未完成桌面矩阵保持不变。提交引用以包含本节的 Git 提交为准。
+
+### 2026-10-21 16:06 隐藏恢复收口（AC-05）
+
+- dsh 隐藏窗口查找与恢复由 [SPEC-020](020-window-reveal-hidden-minimized.md) 完成：`windowTitle`＋`processNames` 也查隐藏窗口，命中的 dsh 走自身单实例恢复。
+- 用户 16:06 确认：dsh 隐藏后侧边图标与面板均恢复前台、X 仍可后台。因此 AC-05 的隐藏主窗口恢复获得真机通过。
+
+### 2026-10-21 17:14 受控失败真机测试（AC-01～AC-04 收口）
+
+- 方法：启动**独立第二个指示灯实例**（独立 `--user-data-dir`、临时 `logs/spec013-test.yaml`、CDP 9223），配置两个 `process` 任务匹配 `Notepad3.exe`、`jump.terminal.windowProcess: NoSuchSpec013Window.exe`；不修改用户 `config.local.yaml` 或主实例。
+  - AC-01：点击任务行后日志为 `聚焦请求` → `已枚举 0 个候选窗口` → `未找到唯一的隐藏主窗口` → `桌面目标未找到或激活未确认：NoSuchSpec013Window.exe` → `无法定位任务现场`；面板提示为 **“未找到 Spec013 missing target 主窗口，请先打开工具后重试”**，不含旧的通用 cwd/logFile 误导；未配置 cwd/logFile，未发生目录/日志兜底或无关窗口抢占。
+  - AC-02/03：失败后真实面板被创建/复用并显示完整提示（CDP DOM：`.panel-toast` 文本、`class="panel-toast show"`、`white-space: normal`、380×43）；截图 `logs/spec013-test-panel-cdp.png`。面板消息走真实 `showPanelMessage` 通道，`mark_read` 独立性由既有 renderer 测试保护。
+  - AC-04：把测试实例强制到右停靠窄布局后，用真实渲染层给 `.lamp-toast` 灌入 201 字长消息：`white-space: nowrap`、`overflow: hidden`、`text-overflow: ellipsis`、高度 29（≤36），`scrollWidth 1339 > clientWidth 88`，无逐字竖排/尺寸撑爆；截图 `logs/spec013-lamp-toast-cdp.png`。生产路径中该灯条兜底只在面板通道失败时触发（`showActionError` 先走面板），本次面板通道成功因此灯条不显示；兜底调用路径与 52 DIP 长消息布局由 `overlay-actions`/`ui-panel` 测试与 `check:ui` 24 场景断言保护，本条真实渲染证据为**强制窄布局 + 真实 DOM/CSS**，不把夹具结果冒充为一次真实面板通道失败的灯条弹出。
+  - 全量回归仍为 58 文件 852 项通过、typecheck/build/smoke 全绿（代码未变）；测试实例与临时配置已清理，主实例不受影响。
+- 结论：AC-01（刷新/失败说明/不抢无关窗口）、AC-02（面板完整反馈、renderer 独立确认由测试保护）、AC-03（面板握手/消息）、AC-04（窄灯条长消息单行省略、面板完整换行）、AC-05/06/07（隐藏恢复、异常隔离、真实脚本）均有证据；AC-04 的灯条兜底触发路径以“面板通道成功时不弹灯条”为设计事实，窄布局渲染用真实 DOM/CSS 复核并注明。本规格状态改为 `done`。

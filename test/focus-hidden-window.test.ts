@@ -21,6 +21,7 @@ function fixture(discovery: ExecResult | Error = ok(JSON.stringify([hidden]))) {
       return discovery;
     }
     if (script.includes('LAMPDSHREVEAL')) return ok('LAMPDSHREVEAL ok=True');
+    if (script.includes('LAMPWORKBUDDYREVEAL')) return ok('LAMPWORKBUDDYREVEAL ok=True');
     if (script.includes('LAMPVERIFY')) return ok('LAMPVERIFY ok=True');
     if (script.includes('LAMPFOCUS')) return ok('LAMPFOCUS ok=True');
     return ok('[]');
@@ -66,6 +67,69 @@ it('does not enumerate hidden windows for an unrestricted title-only target', as
   const { service, exec } = fixture();
   await service.focusTerminal(task, { terminal: { type: 'windowTitle', match: 'DeepSeek' } });
   expect(exec.mock.calls.some(([, args]) => args.at(-1)?.includes('LampWindowDiscovery'))).toBe(false);
+});
+
+it('discovers a hidden window for a windowTitle target with processNames and uses the dsh entry', async () => {
+  const titleTask: TaskConfig = {
+    ...task,
+    jump: { terminal: { type: 'windowTitle', match: 'DeepSeek Harness', processNames: ['DeepSeek Harness.exe'] } },
+  };
+  const { service, exec } = fixture();
+  expect((await service.focusTerminal(titleTask, titleTask.jump)).ok).toBe(true);
+  expect(exec.mock.calls.some(([, args]) => args.at(-1)?.includes('LampWindowDiscovery'))).toBe(true);
+  const reveal = exec.mock.calls.find(([, args]) => args.at(-1)?.includes('LAMPDSHREVEAL'))?.[1].at(-1) ?? '';
+  expect(reveal).toContain('[IntPtr]527050');
+});
+
+it('keeps Win32 activation for a non-native process discovered through a windowTitle target', async () => {
+  const editorTask: TaskConfig = {
+    id: 'editor', name: 'Editor', enabled: true,
+    monitor: { type: 'webhook', listen: '127.0.0.1', path: '/hook/editor' },
+    jump: { terminal: { type: 'windowTitle', match: 'Editor', processNames: ['ExampleEditor.exe'] } },
+  };
+  const discovery = ok(JSON.stringify([{ ...hidden, ProcessName: 'ExampleEditor', MainWindowTitle: 'Editor — workspace' }]));
+  const { service, exec, spawn } = fixture(discovery);
+  expect((await service.focusTerminal(editorTask, editorTask.jump)).ok).toBe(true);
+  expect(exec.mock.calls.some(([, args]) => args.at(-1)?.includes('LampWindowDiscovery'))).toBe(true);
+  const focus = exec.mock.calls.find(([, args]) => args.at(-1)?.includes('LAMPFOCUS'))?.[1].at(-1) ?? '';
+  expect(focus).toContain('::ShowWindow');
+  expect(exec.mock.calls.some(([, args]) => /LAMPDSHREVEAL|LAMPWORKBUDDYREVEAL/u.test(args.at(-1) ?? ''))).toBe(false);
+  expect(spawn).not.toHaveBeenCalled();
+});
+
+it('keeps the native WorkBuddy route for a hidden windowTitle target', async () => {
+  const wbTask: TaskConfig = {
+    id: 'workbuddy', name: 'WorkBuddy', enabled: true,
+    monitor: { type: 'webhook', listen: '127.0.0.1', path: '/hook/workbuddy' },
+    jump: { terminal: { type: 'windowTitle', match: 'WorkBuddy', processNames: ['WorkBuddy.exe'] } },
+  };
+  const discovery = ok(JSON.stringify([{ ...hidden, ProcessName: 'WorkBuddy', MainWindowTitle: 'WorkBuddy' }]));
+  const { service, exec } = fixture(discovery);
+  expect((await service.focusTerminal(wbTask, wbTask.jump)).ok).toBe(true);
+  expect(exec.mock.calls.some(([, args]) => args.at(-1)?.includes('LAMPWORKBUDDYREVEAL'))).toBe(true);
+  expect(exec.mock.calls.some(([, args]) => args.at(-1)?.includes('LAMPDSHREVEAL'))).toBe(false);
+});
+
+it('keeps Win32 foreground recovery for a visible windowTitle dsh target', async () => {
+  const titleTask: TaskConfig = {
+    ...task,
+    jump: { terminal: { type: 'windowTitle', match: 'DeepSeek Harness', processNames: ['DeepSeek Harness.exe'] } },
+  };
+  const visible = {
+    Id: 34092, ProcessName: 'DeepSeek Harness', MainWindowTitle: 'A task — DeepSeek Harness',
+    MainWindowHandle: 527050, ClassName: 'Chrome_WidgetWin_1', Visible: true, Owner: 0, ToolWindow: false, Width: 1200, Height: 800,
+  };
+  const exec = vi.fn(async (_command: string, args: string[]) => {
+    const script = args.at(-1) ?? '';
+    if (script.includes('LampWindowDiscovery')) return ok('[]');
+    if (script.includes('LAMPDSHREVEAL')) return ok('LAMPDSHREVEAL ok=True');
+    if (script.includes('LAMPFOCUS')) return ok('LAMPFOCUS ok=True');
+    return ok(JSON.stringify([visible]));
+  });
+  const service = new FocusService({ spawner: { exec, spawn: vi.fn(() => true) }, tasks: () => [task] });
+  expect((await service.focusTerminal(titleTask, titleTask.jump)).ok).toBe(true);
+  expect(exec.mock.calls.some(([, args]) => args.at(-1)?.includes('LAMPFOCUS'))).toBe(true);
+  expect(exec.mock.calls.some(([, args]) => args.at(-1)?.includes('LAMPDSHREVEAL'))).toBe(false);
 });
 
 it('honors case-insensitive configured process names and an explicit title filter', async () => {

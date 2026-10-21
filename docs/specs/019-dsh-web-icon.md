@@ -1,6 +1,6 @@
 # SPEC-019：dsh Web 任务使用「浏览器＋鲸鱼」图标
 
-> 状态：implementing
+> 状态：done
 > 类型：feature（显示元数据）
 > 需求来源：2026-10-21 用户反馈「我记得我设计的监控 dsh web 端的用的是另外一个图标（小鲸鱼在浏览器中）这个地方好像没有体现」。
 > 负责人：Codex
@@ -46,25 +46,35 @@
 
 | AC | 测试文件/完整用例名或真机步骤 | Red 证据 | Green 证据 | 回归/平台验收 |
 | --- | --- | --- | --- | --- |
-| AC-01 | `test/ui-metadata.test.ts` 新增「dsh Web 任务按配置使用浏览器图标」用例 | 待填 | 待填 | 本机 |
-| AC-02 | 同文件热重载用例补充 dsh↔dsh-web 切换断言 | 待填 | 待填 | 本机 |
-| AC-03 | 同文件既有四类映射用例（保持通过） | 不涉及 | 待填 | 本机 |
-| AC-04 | `npm run check:ui`（24 用例 + 截图）与真机重启截图 | 夹具未含 dsh-web 时截图无该图形（改造前状态） | 待填 | 本机 Windows |
+| AC-01 | `test/ui-metadata.test.ts` → `SPEC-019 dsh Web 图标 > dsh 任务按配置的浏览器 URL 跳转字段使用 dsh-web，桌面 dsh 保持不变` | 2026-10-21 14:07 将 `src/main/store.ts`、`src/shared/types.ts` 回退到 b1bc9d8（保留新测试）后运行，结果 `2 failed \| 2 passed`；失败断言 `toolKind` 实际 `'dsh'`、期望 `'dsh-web'`，属目标行为缺失而非编译/依赖问题 | 恢复 HEAD（6369bb4）后同命令 `4 passed`，耗时 9ms | 本机 Windows，逻辑层 |
+| AC-02 | 同文件 → `热重载在 dsh 与 dsh-web 之间同步图标，并保留运行与完成元数据` | 同一 Red 运行的第二个失败用例：`toolKind` 实际 `'dsh'`、期望 `'dsh-web'`，同时断言 `status: 'success'`、`lastCompletionAt: 456`、`unread: true` 均保留 | 同一 Green 运行 4 passed | 本机 Windows，逻辑层 |
+| AC-03 | 同文件既有四类映射用例 + `test/ui-metadata.test.ts > SPEC-012 ...` 原有用例 | 不涉及（不改这些路径） | 同一 Green 运行中既有用例保持通过 | 本机 Windows，逻辑层 |
+| AC-04 | `npm run check:ui`（24 用例 + 截图）与真机悬浮灯截图 | 夹具已加入 `dsh-web`（`scripts/ui-render-check.cjs`），改造前截图无该图形 | 2026-10-21 15:18 `npm run check:ui` PASS：24 个真实 Electron 渲染用例；15:20 夹具面板 DOM 断言 `dshWebHasBrowserFrame=true` 并截图；15:21 实机悬浮灯截图 `logs/spec019-live-lamp-3rows.png` 显示鲸鱼、小猫、浏览器+鲸鱼三个图标 | 本机 Windows GUI 通过 |
 
 证据包含命令、退出码、工作区状态、日志引用；Red 必须因目标行为缺失而失败，不使用编译错误或缺依赖冒充。
 
 ## 6. 执行记录
 
 - 规格就绪依据：用户 2026-10-21 反馈 + 2026-10-20 图标确认记录；仍待澄清项：无（分类规则取配置 URL 跳转字段，为本规格显式假设）。
-- 修改前回退：`npm test` 与 `npm run check:ui` 基线（本机 b1bc9d8）待记录；无既有失败预期。
-- Red → Green → Refactor：待填。
-- TDD 例外：文档更新与渲染夹具调整不以文本镜像测试冒充 TDD，以实际渲染截图与 `results.json` 验证。
+- 基线：b1bc9d8 回退实测，`test/ui-metadata.test.ts` Red 为 `2 failed | 2 passed`；工作区无既有失败干扰。
+- Red → Green → Refactor（2026-10-21）：
+  - Red：`git checkout b1bc9d8 -- src/main/store.ts src/shared/types.ts` 后运行 `node node_modules/vitest/vitest.mjs run test/ui-metadata.test.ts`，2 个新用例失败，`toolKind` 为 `'dsh'`。失败原因是缺少 `dsh-web` 分类与联合类型取值，符合预期。
+  - Green：`git checkout HEAD -- src/main/store.ts src/shared/types.ts` 恢复 6369bb4 实现，同命令 `4 passed`（9ms）。
+  - Refactor：无必要，行为改动集中在 `presentationFor()` 与 `isDshWebTarget()` 两个纯函数。
+- TDD 例外：`scripts/ui-render-check.cjs` 夹具调整与两份文档更新不改变产品行为，以渲染证据与文档一致性检查为准。
+
+### 2026-10-21 15:18–15:21 补齐 GUI 验收
+
+- `npm run check:ui`：PASS，24 个真实 Electron 渲染用例，截图与 `results.json` 在 `logs/spec012-ui`；GPU 降级错误为 stderr 噪音，退出码 0。
+- 夹具面板补强证据：临时脚本 `logs/spec019-icon-inspect.cjs` 渲染 3 行 fixture（Codex/dsh/dsh-web），断言 dsh-web 行 SVG 含浏览器框与鲸鱼路径（`dshWebHasBrowserFrame=true`），截图 `logs/spec019-panel-dsh-web.png`。
+- 实机：运行中的指示灯悬浮灯区域截图 `logs/spec019-live-lamp-3rows.png`（`logs/capture-lamp.ps1`，窗口 3788,103,64×168）显示三个图标：鲸鱼（dsh）、小猫（WorkBuddy）、浏览器+鲸鱼（dsh-web）。AC-04 真机 GUI 通过。
+- 全量回归：15:16 `npm test` 58 文件 851 项全部通过、exit 0（`logs/spec020-full-test.log`）；类型检查 exit 0；构建与 smoke exit 0（`logs/spec020-{build,smoke}.log`）。
 
 ## 7. 交付与验收
 
-- [ ] 所有 AC 有验收证据，满足[流程 DoD](../development/spec-tdd.md)。
-- [ ] 类型检查、全量测试、构建后 smoke / check:ui 结果已记录。
-- [ ] 相关文档、规格索引已更新；无秘密或本机配置进入提交。
-- [ ] 已知失败/未完成项、回退步骤、发布状态已说明。
+- [x] 所有 AC 有验收证据，满足[流程 DoD](../development/spec-tdd.md)。
+- [x] 类型检查、全量测试、构建后 smoke / check:ui 结果已记录。
+- [x] 相关文档、规格索引已更新；无秘密或本机配置进入提交。
+- [x] 已知失败/未完成项、回退步骤、发布状态已说明。
 
-最终结果/提交引用：待填写。
+最终结果/提交引用：功能实现 commit `6369bb4`（7 文件 +114/-5，已推送 origin/main）。2026-10-21 15:18–15:21 补齐 AC-04：`check:ui` 24 用例 PASS、夹具面板截图与实机悬浮灯截图均出现「浏览器+鲸鱼」，全量 851 项与类型/构建/smoke 全绿。状态 `done`；无已知未验收项。

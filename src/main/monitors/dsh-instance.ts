@@ -460,6 +460,17 @@ export function deriveSessionStatus(input: {
   readonly runningSilenceMs?: number;
   /** 刚刚有活动 → 视为 starting 的窗口，默认 5s。 */
   readonly connectGraceMs?: number;
+  /**
+   * SPEC-021：轮询侧观察到的最近一次**活信号**时刻（本地接收时间）。
+   *
+   * 桌面端 `updatedAt` 只在回合边界推进；长回合里 `projections` 的
+   * `asOfSeq`/`tokenUsage`/`contextPressure` 等仍会推进。监控器把这些
+   * 变化折算成本地时刻传进来，仅在 `running===true` 时参与静默判定。
+   *
+   * 只接受有限、非未来（允许 60s 时钟偏差）的时间；非法值忽略，退回
+   * `updatedAt`，避免伪造“永远活跃”。
+   */
+  readonly lastLiveSignalAt?: number;
 }): TaskStatus {
   const now = input.now ?? Date.now();
   const silenceMs = input.silenceMs ?? 60_000;
@@ -495,9 +506,20 @@ export function deriveSessionStatus(input: {
    * 阈值仍在两条实测值之间，727 秒级的陈旧 running 照样会被判 idle。
    */
   const effectiveSilenceMs = input.running === true ? runningSilenceMs : silenceMs;
+  // SPEC-021：running 时把“活信号时刻”也算进最近活动；非 running 不使用，
+  // 避免活信号改变 idle/starting 的原有语义。未来时间戳（>60s 偏差）忽略。
+  let lastActivityAt = input.updatedAt;
+  if (input.running === true && input.lastLiveSignalAt !== undefined) {
+    const live = input.lastLiveSignalAt;
+    if (Number.isFinite(live) && live > 0 && live <= now + 60_000) {
+      const clamped = Math.min(live, now);
+      lastActivityAt =
+        lastActivityAt === undefined ? clamped : Math.max(lastActivityAt, clamped);
+    }
+  }
   if (
-    input.updatedAt !== undefined &&
-    now - input.updatedAt > effectiveSilenceMs &&
+    lastActivityAt !== undefined &&
+    now - lastActivityAt > effectiveSilenceMs &&
     input.pendingInteraction === undefined
   ) {
     return 'idle';
@@ -535,7 +557,7 @@ export function deriveSessionStatus(input: {
 export function deriveFromListItem(
   item: DshSessionListItem,
   now: number = Date.now(),
-  options: { allowPlanPendingHeuristic?: boolean } = {},
+  options: { allowPlanPendingHeuristic?: boolean; liveSignalAt?: number } = {},
 ): TaskStatus {
   const values = item.projections?.values;
   const unsettled = (values?.subagentCatalog ?? []).filter((s) => s.settledAt === undefined).length;
@@ -550,6 +572,28 @@ export function deriveFromListItem(
     ...(planPending ? { pendingInteraction: 'plan-review' as const } : {}),
     runningSubagentCount: unsettled,
     updatedAt: item.updatedAt,
+    ...(options.liveSignalAt !== undefined ? { lastLiveSignalAt: options.liveSignalAt } : {}),
     now,
   });
+}
+
+/**
+ * SPEC-021：长回合“活信号”指纹。
+ *
+ * 只取**活动相关**的投影字段，刻意不含 title/updatedAt：
+ * 标题变化不代表在干活，updatedAt 只在回合边界推进。
+ * 指纹变化由监控器折算为本地 `lastLiveSignalAt`，用于延长 running。
+ */
+export function liveSignalFingerprint(item: DshSessionListItem): string {
+  const values = item.projections?.values;
+  return JSON.stringify([
+    item.projections?.asOfSeq ?? null,
+    values?.tokenUsage?.uncachedInputTokens ?? null,
+    values?.tokenUsage?.outputTokens ?? null,
+    values?.sessionStats?.turns ?? null,
+    values?.plan?.active ?? null,
+    values?.plan?.pending ?? null,
+    (values?.subagentCatalog ?? []).map((s) => [s.id ?? '', s.settledAt ?? null]),
+    values?.contextPressure?.pressureTokens ?? null,
+  ]);
 }
