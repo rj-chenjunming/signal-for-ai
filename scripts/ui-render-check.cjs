@@ -19,7 +19,7 @@ function snapshot(count, paused = false) {
   const store = new TaskStore(Array.from({ length: count }, (_, i) => ({ id: `fixture-${i}`, name: ['Codex', 'dsh', 'WorkBuddy'][i % 3], enabled: true, monitor: { type: 'webhook', listen: '127.0.0.1', path: `/fixture/${i}` } })));
   const s = store.getSnapshot();
   s.version = 1; s.paused = paused; s.aggregate = 'running'; s.runningCount = 1;
-  s.tasks = s.tasks.map((t, i) => ({ ...t, toolKind: ['codex', 'dsh', 'workbuddy'][i % 3], status: states[i % 7], paused, unread: i % 7 === 2, portLabel: '很长的工具标签与端口名称', name: i === 0 ? 'Codex · 很长的任务名称 <b>纯文本</b>' : t.name, message: '示例任务状态 · 长文本自动换行，其他操作收进更多菜单。', startedAt: Date.now() - 127000, durationMs: 127000 }));
+  s.tasks = s.tasks.map((t, i) => ({ ...t, toolKind: ['codex', 'dsh', 'dsh-web', 'workbuddy'][i % 4], status: states[i % 7], paused, unread: i % 7 === 2, portLabel: '很长的工具标签与端口名称', name: i === 0 ? 'Codex · 很长的任务名称 <b>纯文本</b>' : t.name, message: '示例任务状态 · 长文本自动换行，其他操作收进更多菜单。', startedAt: Date.now() - 127000, durationMs: 127000 }));
   s.displayTasks = s.tasks; s.stripMode = count >= 2;
   s.counts = Object.fromEntries(states.map(state => [state, s.tasks.filter(t => t.status === state).length]));
   return s;

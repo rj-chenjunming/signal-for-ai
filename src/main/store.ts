@@ -33,11 +33,21 @@ import type {
   TaskStatus,
 } from '../shared/types';
 
+/**
+ * dsh 桌面端与 dsh Web 共用 `monitor.type: 'dsh'`，只能从配置里「点击后切到浏览器 URL」的能力区分。
+ * 这些字段只在 Web 场景有意义，因此不需要新增配置或按运行消息猜测；没有它们的 dsh 仍是桌面鲸鱼。
+ */
+function isDshWebTarget(cfg: TaskConfig): boolean {
+  const jump = cfg.jump;
+  return Boolean(jump?.openUrl || jump?.openUrlTitleMatch || jump?.openUrlDebugPort || jump?.openUrlViaExtension);
+}
+
 /** UI capability metadata derives from configured routes, never from monitor messages. */
 function presentationFor(cfg: TaskConfig): Pick<TaskState, 'toolKind' | 'availableActions'> {
   const kind = cfg.monitor.type;
-  const toolKind = kind === 'codex' ? 'codex' : kind === 'dsh' ? 'dsh'
-    : /workbuddy/i.test(`${cfg.id} ${cfg.name}`) ? 'workbuddy' : 'generic';
+  const toolKind = kind === 'codex' ? 'codex'
+    : kind === 'dsh' ? (isDshWebTarget(cfg) ? 'dsh-web' : 'dsh')
+      : /workbuddy/i.test(`${cfg.id} ${cfg.name}`) ? 'workbuddy' : 'generic';
   const availableActions: NonNullable<TaskState['availableActions']> = ['focus_terminal'];
   if (cfg.jump?.logFile) availableActions.push('open_log');
   if (cfg.jump?.cwd) availableActions.push('open_dir');

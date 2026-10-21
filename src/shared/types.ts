@@ -405,7 +405,7 @@ export interface TaskState {
   processPresent?: boolean;
   taskId: string;
   /** 主进程推导的显示元数据；旧快照由渲染层兜底。 */
-  toolKind?: 'codex' | 'dsh' | 'workbuddy' | 'generic';
+  toolKind?: 'codex' | 'dsh' | 'dsh-web' | 'workbuddy' | 'generic';
   availableActions?: TaskAction[];
   name: string;
   status: TaskStatus;

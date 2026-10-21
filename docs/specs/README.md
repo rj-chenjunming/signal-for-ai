@@ -5,6 +5,7 @@
 | Spec ID | 文档 | 类型 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
 | BASELINE-000 | [当前基线](000-baseline.md) | 接管现状 | observed | 从当前提交核对，不补造历史 TDD |
+| SPEC-019 | [dsh Web 使用浏览器+鲸鱼图标](019-dsh-web-icon.md) | feature（显示元数据） | implementing | 按配置 URL 跳转字段区分 dsh 桌面/Web，不改监控与跳转；待 Red/Green |
 | SPEC-018 | [启动器配置参数转发](018-start-cli-arguments.md) | 修复 | done | 有效 Red/Green、709 项回归、Windows 指定配置启动通过；原编号 SPEC-009，2026-10-21 与 dsh 看门狗规格冲突后改为 018 |
 | SPEC-017 | [桌面工具存在时才监控](017-desktop-process-presence.md) | 修复/行为 | ready | 确认退出则停源、不红、隐藏灯行，重新出现自动恢复；保留真实故障，待Red/Green |
 | SPEC-016 | [Windows双击启动入口](016-desktop-start-script.md) | 新能力 | done | 824项/类型/构建/smoke通过；真实cmd从其他目录启动及单实例复用通过，保留配置与自动运行时回退 |

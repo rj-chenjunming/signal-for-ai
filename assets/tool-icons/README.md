@@ -15,4 +15,6 @@
 
 [预览](preview.png)同时展示大图和实际 20/24/32px 尺寸。预览只使用本地图形，无远程资源。
 
-2026-10-20 用户回复“没问题”确认画稿后，桌面鲸鱼、小猫、机器人已接入 `src/renderer/ui.ts` 并在实际指示灯加载。应用内使用 currentColor 跟随深浅色，状态点独立表达状态。dsh Web 图形作为 `dsh-web` 素材保留；当前监控配置仍映射桌面 dsh，没有新增 Web/桌面自动分类。此切片不改变配置、监控、IPC 或跳转行为，TDD 不适用；回归、实际渲染与运行记录见 [SPEC-012](../../docs/specs/012-lightweight-desktop-ui.md)。
+2026-10-20 用户回复“没问题”确认画稿后，桌面鲸鱼、小猫、机器人已接入 `src/renderer/ui.ts` 并在实际指示灯加载。应用内使用 currentColor 跟随深浅色，状态点独立表达状态。
+
+2026-10-21 用户指出「dsh Web 端的另一个图标（小鲸鱼在浏览器中）没有体现」后，按 [SPEC-019](../../docs/specs/019-dsh-web-icon.md) 补齐分类：dsh 型任务只要配置了浏览器 URL 跳转能力（`jump.openUrl` / `openUrlTitleMatch` / `openUrlDebugPort` / `openUrlViaExtension` 任一），显示元数据即为 `dsh-web`，悬浮灯/面板使用「浏览器＋鲸鱼」；没有这些字段的 dsh 仍是桌面鲸鱼。分类只依据任务配置推导，不新增必填配置，也不改变监控、IPC、跳转或状态行为。
