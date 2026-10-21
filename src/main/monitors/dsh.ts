@@ -155,6 +155,13 @@ export interface DshMonitorOptions {
    */
   readonly discoverAuthority?: () => Promise<string | null>;
   /**
+   * 单轮看门狗（毫秒），默认 120000（SPEC-009）。
+   *
+   * 一轮超过这个时间还没返回就强制释放 `polling` 并立即排下一轮，同时留一条
+   * warn —— 否则一次 ssh/网络挂起会让监控静默停摆（现场事故见 SPEC-009）。
+   */
+  readonly pollWatchdogMs?: number;
+  /**
    * 可选：插件上报的精确等待信号。
    * 键是 sessionId，值是插件的 `pendingInteraction` / `errorMessage`。
    * 未注入时退化为 `plan.pending` 近似路径（D2 的"插件失效自动退回"）。
@@ -163,6 +170,15 @@ export interface DshMonitorOptions {
     | { pendingInteraction?: 'approval' | 'plan-review' | 'question'; errorMessage?: string }
     | undefined;
 }
+
+/**
+ * 单轮轮询的看门狗阈值（SPEC-009）。
+ *
+ * 必须大于"最慢的合法一轮"：远端密钥走 ssh 时硬超时 15s，加一次 RPC 8s，
+ * 正常上限约 25s；120s 足够宽松，只用来抓真正的挂死（ssh 卡在握手、fetch
+ * 被中间设备吞掉），而不是误杀慢请求。
+ */
+const DEFAULT_POLL_WATCHDOG_MS = 120_000;
 
 /** 一次轮询的结果摘要，供测试与诊断。 */
 export interface DshPollOutcome {
@@ -384,6 +400,25 @@ export class DshMonitor extends MonitorAdapter {
       return this.lastOutcome;
     }
     this.polling = true;
+    // SPEC-009：单轮看门狗。
+    //
+    // 现场事故：远端密钥（ssh）或 fetch 挂住时，`await` 永不返回 —— 于是
+    // `polling` 一直是 true、既不上报也不再排下一轮，而日志里一行都没有，
+    // 监控就这么静默死了（dsh-web 曾从 17:47 起再没更新过）。
+    const watchdogMs = this.options.pollWatchdogMs ?? DEFAULT_POLL_WATCHDOG_MS;
+    let watchdogFired = false;
+    const watchdog = setTimeout(() => {
+      if (!this.polling) return;
+      watchdogFired = true;
+      this.polling = false;
+      this.failureCount += 1;
+      this.log.warn(
+        `dsh ${this.authorityLabel} 本轮轮询超过 ${watchdogMs}ms 未返回（疑似 ssh/远端挂起），` +
+          '看门狗强制恢复并立即排下一轮',
+      );
+      this.scheduleNext();
+    }, watchdogMs);
+    watchdog.unref?.();
     try {
       const client = await this.ensureClient();
       const result = await client.listSessions();
@@ -399,8 +434,12 @@ export class DshMonitor extends MonitorAdapter {
       const message = err instanceof Error ? err.message : String(err);
       return this.recordFailure('credentials/missing', message, now);
     } finally {
-      this.polling = false;
-      this.scheduleNext();
+      clearTimeout(watchdog);
+      if (!watchdogFired) {
+        // 看门狗已经接管过这一轮（它自己排了下一轮），这里不要再动 polling
+        this.polling = false;
+        this.scheduleNext();
+      }
     }
   }
 
