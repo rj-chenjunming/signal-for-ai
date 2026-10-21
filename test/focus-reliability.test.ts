@@ -68,11 +68,10 @@ describe('SPEC-002/AC-03 桌面切换', () => {
     const svc = new FocusService({ spawner: f.spawner, tasks: () => [{ ...task, jump }] });
     await svc.refreshWindows();
     const original = f.spawner.exec;
-    let reads = 0;
-    // SPEC-013 refreshes before every click. Simulate the restart after that
-    // refresh, so this still protects the failed-activation retry path.
+    // SPEC-022：缓存优先，第一次点击直接用缓存 500；模拟应用已重启，
+    // 激活失败后的刷新必须拿到新 HWND 501，而不是再次返回旧值。
     f.spawner.exec = async (cmd, args, timeout) => args.join(' ').includes('Get-Process |')
-      ? { ok: true, stdout: JSON.stringify([++reads === 1 ? window : { ...window, Id: 43, MainWindowHandle: 501 }]), stderr: '', code: 0 }
+      ? { ok: true, stdout: JSON.stringify([{ ...window, Id: 43, MainWindowHandle: 501 }]), stderr: '', code: 0 }
       : original(cmd, args, timeout);
     const activation = vi.spyOn(svc, 'focusExistingWindow').mockImplementation(async win => win.hwnd === 501);
     const result = await svc.focusTerminal(task, { terminal: jump.terminal });

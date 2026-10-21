@@ -150,6 +150,20 @@ describe('★ windowTitle 的 processNames 过滤（区分原生客户端与浏�
     expect(res.detail).not.toContain('Google Chrome');
   });
 
+  it('SPEC-022：已有窗口缓存时不再重复枚举（减少一次 PowerShell 启动）', async () => {
+    const sp = makeSpawner({}, BOTH);
+    const svc = new FocusService({ spawner: sp, tasks: () => [{ ...TASK, jump: JUMP }] });
+    await svc.refreshWindows();
+    sp.calls.length = 0;
+
+    const res = await svc.focusTerminal(TASK, JUMP);
+    expect(res.ok).toBe(true);
+    const enumerations = sp.calls.filter(
+      (call) => call.kind === 'exec' && call.args.join(' ').includes('Get-Process'),
+    );
+    expect(enumerations).toHaveLength(0);
+  });
+
   it('★★ 标题匹配失败时**不许**盲抢别的窗口（否则会切到无关窗口）', async () => {
     // 实测踩到的严重问题：任务配了 windowTitle 但目标窗口不可见
     // （例：WorkBuddy 缩到托盘）时，原实现会"盲聚焦第一个候选窗口" ——

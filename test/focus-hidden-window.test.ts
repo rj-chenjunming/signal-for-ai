@@ -152,8 +152,7 @@ it('requires foreground confirmation even after discovering the hidden main wind
   const exec = vi.fn(async (_command: string, args: string[]) => {
     const script = args.at(-1) ?? '';
     if (script.includes('LampWindowDiscovery')) return ok(JSON.stringify([hidden]));
-    if (script.includes('LAMPDSHREVEAL')) return ok('LAMPDSHREVEAL ok=True');
-    if (script.includes('LAMPVERIFY')) return ok('LAMPVERIFY ok=False');
+    if (script.includes('LAMPDSHREVEAL')) return ok('LAMPDSHREVEAL ok=False');
     if (script.includes('LAMPFOCUS')) return ok('LAMPFOCUS ok=False');
     return ok('[]');
   });

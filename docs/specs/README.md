@@ -5,6 +5,7 @@
 | Spec ID | 文档 | 类型 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
 | BASELINE-000 | [当前基线](000-baseline.md) | 接管现状 | observed | 从当前提交核对，不补造历史 TDD |
+| SPEC-022 | [桌面切换延迟（点击任务行到前台确认）](022-focus-latency.md) | bugfix（性能/交互时延） | done | 缓存优先 + 原生脚本内前台确认；真机 WorkBuddy 2.18s、dsh 1.90s（原 5.5–14s）；Red 7失败/Green 104、全量 862 项 |
 | SPEC-021 | [dsh 长回合活跃信号](021-dsh-long-turn-liveness.md) | feature（状态判定） | done | asOfSeq/tokenUsage/contextPressure 指纹延长 running；Red 2失败/Green 98、全量 858；真机静默 645 秒 dsh 行仍蓝；卡死侧由测试覆盖 |
 | SPEC-020 | [后台窗口恢复（隐藏/最小化）](020-window-reveal-hidden-minimized.md) | 修复/行为补齐 | done | 隐藏查找支持 windowTitle＋processNames；仅隐藏候选/windowProcess 走单实例，可见/最小化 windowTitle 保持 Win32（15:28 真机回归已修）；Red 15→1失败/Green 57、全量852项；16:06 用户确认 dsh/WorkBuddy 恢复与 X 后台均正常 |
 | SPEC-019 | [dsh Web 使用浏览器+鲸鱼图标](019-dsh-web-icon.md) | feature（显示元数据） | done | 按配置 URL 跳转字段区分 dsh 桌面/Web；Red 2失败/Green 4通过；15:18 check:ui 24 用例 PASS，夹具与实机悬浮灯截图均出现「浏览器+鲸鱼」 |

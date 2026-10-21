@@ -13,7 +13,7 @@ export function buildNativeWindowRevealScript(pid: number, hwnd: number, app: Na
   }
   return `
 $ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class LampNativeOwner { [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd); }'
+Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class LampNativeOwner { [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd); [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); }'
 [uint32]$ownerPid = 0
 $nativeHandle = [IntPtr]${hwnd}
 [void][LampNativeOwner]::GetWindowThreadProcessId($nativeHandle, [ref]$ownerPid)
@@ -30,6 +30,14 @@ try {
     [void][LampNativeOwner]::ShowWindow($nativeHandle, 9)
     Start-Sleep -Milliseconds 120
   }
+  # SPEC-022：前台确认并入本脚本，成功 marker 只在真实前台时输出。
+  # 轮询最多约 1s，避免 handoff 后前台切换尚未完成就误判失败。
+  $foreground = $false
+  for ($i = 0; $i -lt 20; $i++) {
+    if ([LampNativeOwner]::GetForegroundWindow() -eq $nativeHandle) { $foreground = $true; break }
+    Start-Sleep -Milliseconds 50
+  }
+  if (!$foreground) { throw '${profile.label} foreground not confirmed' }
   Write-Output '${profile.marker}'
 } finally {
   $relay.Dispose()

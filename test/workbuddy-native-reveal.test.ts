@@ -33,6 +33,8 @@ function fixture(visible:boolean,reveal:ExecResult|Error=ok('LAMPWORKBUDDYREVEAL
 it.each([true,false])('uses WorkBuddy own entry for the matching existing window (visible=%s)',async visible=>{
   const {service,exec,spawn}=fixture(visible);
   expect((await service.focusTerminal(task,task.jump)).ok).toBe(true);
+  // SPEC-022：前台确认并入原生恢复脚本，不再额外启动 LAMPVERIFY。
+  expect(exec.mock.calls.some(([,args])=>args.at(-1)?.includes('LAMPVERIFY'))).toBe(false);
   const script=exec.mock.calls.find(([,args])=>args.at(-1)?.includes('LAMPWORKBUDDYREVEAL'))?.[1].at(-1)??'';
   expect(script).toContain('GetWindowThreadProcessId');
   expect(script).toContain('WorkBuddy.exe');
@@ -41,6 +43,11 @@ it.each([true,false])('uses WorkBuddy own entry for the matching existing window
   expect(script.indexOf('$ownerPid -ne 15320')).toBeLessThan(script.indexOf('Start-Process'));
   expectGuardedRestoreOnly(script);
   expect(spawn).not.toHaveBeenCalled();
+});
+it('SPEC-022: native reveal script confirms foreground before success marker',()=>{
+  const script=buildNativeWindowRevealScript(15320,198210,'workbuddy');
+  expect(script).toContain('GetForegroundWindow');
+  expect(script.indexOf('GetForegroundWindow')).toBeLessThan(script.indexOf('LAMPWORKBUDDYREVEAL ok=True'));
 });
 it('restores a still-minimized WorkBuddy window after the native handoff',async()=>{
   const {service,exec}=fixture(false);
@@ -59,7 +66,7 @@ it.each([{ok:false,stdout:'',stderr:'timeout',code:null},ok('LAMPWORKBUDDYREVEAL
   expect(script.indexOf('::ShowWindow(')).toBeGreaterThan(script.indexOf('$relay.WaitForExit'));
 });
 it('requires foreground confirmation after the client exits',async()=>{
-  const {service}=fixture(false,ok('LAMPWORKBUDDYREVEAL ok=True'),false);
+  const {service}=fixture(false,ok('LAMPWORKBUDDYREVEAL ok=False'));
   expect((await service.focusTerminal(task,task.jump)).ok).toBe(false);
 });
 it('does not launch WorkBuddy when no eligible existing window remains',async()=>{

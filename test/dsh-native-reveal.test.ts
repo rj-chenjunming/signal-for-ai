@@ -35,9 +35,17 @@ it.each([false, true])('uses dsh itself to reveal the existing main window (visi
   const { service, exec, spawn } = fixture(visible);
   expect((await service.focusTerminal(task, task.jump)).ok).toBe(true);
   expect(exec.mock.calls.some(([,args])=>args.at(-1)?.includes('LAMPDSHREVEAL'))).toBe(true);
+  // SPEC-022：前台确认并入原生恢复脚本，不再额外启动 LAMPVERIFY。
+  expect(exec.mock.calls.some(([,args])=>args.at(-1)?.includes('LAMPVERIFY'))).toBe(false);
   const reveal = exec.mock.calls.find(([,args])=>args.at(-1)?.includes('LAMPDSHREVEAL'))?.[1].at(-1) ?? '';
   expectGuardedRestoreOnly(reveal);
   expect(spawn).not.toHaveBeenCalled();
+});
+
+it('SPEC-022: native reveal script confirms foreground before success marker', () => {
+  const script = buildDshNativeRevealScript(34092, 527050);
+  expect(script).toContain('GetForegroundWindow');
+  expect(script.indexOf('GetForegroundWindow')).toBeLessThan(script.indexOf('LAMPDSHREVEAL ok=True'));
 });
 
 it('restores a still-minimized dsh window after the native handoff', async () => {
@@ -59,7 +67,7 @@ it.each([
 });
 
 it('does not report success without foreground confirmation', async () => {
-  const {service}=fixture(false,ok('LAMPDSHREVEAL ok=True'),false);
+  const {service}=fixture(false,ok('LAMPDSHREVEAL ok=False'));
   expect((await service.focusTerminal(task,task.jump)).ok).toBe(false);
 });
 

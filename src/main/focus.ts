@@ -472,12 +472,12 @@ export class FocusService {
       const result = await this.spawner.exec('powershell.exe',
         ['-NoProfile', '-NonInteractive', '-Command', buildNativeWindowRevealScript(win.pid, win.hwnd, app)], this.focusTimeoutMs);
       if (!result.ok || !result.stdout.includes(profile.marker)) {
-        this.logger.warn(`${profile.label} 自身窗口恢复失败或超时，未强制显示`);
+        this.logger.warn(`${profile.label} 自身窗口恢复失败、超时或前台未确认，未强制显示`);
         return false;
       }
-      const confirmed = await this.verifyForeground(win.hwnd);
-      this.logger.info(confirmed ? `${profile.label} 自身恢复成功，前台 HWND 已确认` : `${profile.label} 自身恢复后未确认前台 HWND`);
-      return confirmed;
+      // SPEC-022：前台确认已在同一脚本内完成，不再额外启动一次 PowerShell。
+      this.logger.info(`${profile.label} 自身恢复成功，前台 HWND 已确认`);
+      return true;
     } catch {
       this.logger.warn(`${profile.label} 自身窗口恢复不可用（已隔离，未强制显示）`);
       return false;
@@ -729,8 +729,11 @@ export class FocusService {
     /* ---------------- L2：显式桌面目标，等待激活确认 ---------------- */
     if (terminal?.type === 'windowTitle' || terminal?.type === 'windowProcess') {
       const title = terminal.type === 'windowTitle' ? terminal.match : terminal.titleContains ?? '';
-      // A cached HWND may have been closed/reused since the last click.
-      await this.refreshWindows();
+      // SPEC-022：优先用启动时/上次点击的窗口缓存；只有缓存为空时才枚举。
+      // 缓存 HWND 失效由激活脚本的 owner 校验发现，随后走下面的刷新+重试。
+      if (this.knownWindows.length === 0) {
+        await this.refreshWindows();
+      }
       let win = this.findWindowByTitle(title, terminal.processNames);
       if (win === null) {
         await this.refreshWindows();
