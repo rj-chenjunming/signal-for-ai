@@ -18,8 +18,8 @@
 | SPEC-011 | [Codex 授权等待 Hook](011-codex-approval-hooks.md) | 新能力 / 修复 | done | 746 测试/构建/smoke 通过；用户信任后真实审批黄灯→匹配工具返回蓝灯 PASS |
 | SPEC-010 | [Codex 完成灯与长回合连续性](010-codex-completion-continuity.md) | 修复 | done | 722 项回归全过；真机蓝→绿连续保留 PASS，用户确认效果；点击矩阵仍归 SPEC-002 |
 | SPEC-009 | [dsh 轮询看门狗](009-dsh-poll-watchdog.md) | 修复 | done | 单轮挂死不静默；warn + 立即排下一轮；2026-10-21 用户真机确认 dsh-web 行蓝→绿正常 |
-| SPEC-008 | [软删除会话被当成完成](008-soft-deleted-sessions.md) | 修复 | verifying | SQL 排除 `deleted_at > 0`；16:25 复核软删除仍被排除、最新绿灯对应真实活跃会话；16:30 用户跳过 20 分钟静置观察，时序项未验收 |
-| SPEC-007 | [自动熄灭后重复亮绿](007-dismiss-reannounce.md) | 修复 | verifying | dismiss 同时确认水位；16:12 完成后的观察被真实新完成打断；16:30 用户跳过静置观察，自动熄灭时序项未验收 |
+| SPEC-008 | [软删除会话被当成完成](008-soft-deleted-sessions.md) | 修复 | done | 17:54 真实完成正常亮绿/10 分钟熄灭；18:30 前 36 分钟静置完成水位不变、无幽灵绿；软删除 8 条仍被排除（`logs/spec008-quiet-final.log`） |
+| SPEC-007 | [自动熄灭后重复亮绿](007-dismiss-reannounce.md) | 修复 | done | 17:54:40 完成 → 18:05 熄灭 → 18:30 仍灰；25 分钟静置采样水位恒定、不复亮（`logs/spec007-*`） |
 | SPEC-006 | [dsh 回合完成亮绿](006-dsh-turn-success.md) | 修复 / 能力补齐 | done | dsh 此前永不产生 success；现按回合完成推断；2026-10-21 用户真机确认变绿保持、确认后不复亮 |
 | SPEC-005 | [dsh 端口自动跟随](005-dsh-port-auto-follow.md) | 新能力 | done | 16:52–16:53 真机：dsh 重启 52119→56388，自动发现选中新端口并恢复；用户确认通过 |
 | SPEC-004 | [dsh 长回合被判空闲](004-dsh-long-turn-idle.md) | 修复 | done | 16:54 新回合 running 静默 28 秒、dsh 行蓝色截图；16:11 长静默 4547 秒→idle 属 AC-03 预期；全量 852 项通过 |
