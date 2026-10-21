@@ -21,7 +21,8 @@ import type {
 } from '../../shared/types';
 import type { Logger } from '../logger';
 import type { TaskStore } from '../store';
-import { MonitorAdapter, type MonitorEvent, type MonitorSink } from './base';
+import { MonitorAdapter, type MonitorContext, type MonitorEvent, type MonitorSink } from './base';
+import { createPresenceReader, desktopProcessNames, ProcessPresenceMonitor, type PresenceReader } from './process-presence';
 import { compileRules } from './pattern';
 import { ProcessMonitor } from './process';
 import { LogMonitor } from './logfile';
@@ -43,6 +44,7 @@ interface Binding {
 }
 
 export interface MonitorHostOptions {
+  presenceReader?: PresenceReader;
   store: TaskStore;
   config: AppConfig;
   logger: Logger;
@@ -80,9 +82,11 @@ export class MonitorHost {
   private healthTimer: NodeJS.Timeout | null = null;
   private currentConfig: AppConfig;
   private started = false;
+  private readonly presenceReader: PresenceReader;
 
   constructor(private readonly options: MonitorHostOptions) {
     this.currentConfig = options.config;
+    this.presenceReader = options.presenceReader ?? createPresenceReader();
     this.sink = (taskId, ev) => this.dispatch(taskId, ev);
   }
 
@@ -97,6 +101,7 @@ export class MonitorHost {
     await this.ensureHookServer();
 
     for (const task of this.currentConfig.tasks) {
+      if (!this.started || this.isPaused) break;
       if (!task.enabled) {
         this.options.logger.info(`任务 ${task.id} 已禁用，跳过监控`);
         continue;
@@ -105,6 +110,7 @@ export class MonitorHost {
     }
 
     // 健康巡检：定期检查适配器是否还活着（POC §8 子进程崩溃 -> 重建）
+    if (!this.started) return;
     this.healthTimer = setInterval(() => {
       this.safeHealthCheck();
     }, Math.max(30_000, this.currentConfig.app.pollIntervalMs * 10));
@@ -113,19 +119,25 @@ export class MonitorHost {
 
   /** 启动单个任务的适配器；失败只影响该任务。 */
   private async startOne(task: TaskConfig): Promise<void> {
+    if (!this.started || this.isPaused || this.bindings.has(task.id)) return;
     try {
       const adapter = this.createAdapter(task);
       if (!adapter) {
         throw new Error(`未知的监控类型：${task.monitor.type}`);
       }
-      await adapter.start();
+      // Register before awaiting: stop/pause must also reach an initial in-flight probe.
       this.bindings.set(task.id, {
         config: task,
         adapter,
         hash: hashMonitorConfig(task),
       });
+      await adapter.start();
+      if (!this.started || this.bindings.get(task.id)?.adapter !== adapter) return;
       this.options.logger.info(`任务 ${task.id} 监控已启动（${task.monitor.type}）`);
     } catch (err) {
+      const binding = this.bindings.get(task.id);
+      if (binding) await this.stopBinding(task.id, binding);
+      if (!this.started || this.isPaused) return;
       // 架构 §4.2：失败 -> 该任务转 unknown + 记日志，**其余任务不受影响**
       const message = err instanceof Error ? err.message : String(err);
       this.options.logger.error(`任务 ${task.id} 监控启动失败（已隔离，不影响其它任务）：${message}`);
@@ -158,6 +170,27 @@ export class MonitorHost {
       ackedCompletionAt: () =>
         this.options.store.getTask(task.id)?.ackedCompletionAt ?? 0,
     };
+
+    const names = desktopProcessNames(task);
+    if (names.length) {
+      return new ProcessPresenceMonitor(ctx, {
+        names, reader: this.presenceReader, intervalMs: this.currentConfig.app.pollIntervalMs,
+        source: sink => {
+          const adapter = this.createSourceAdapter({ ...ctx, sink });
+          if (!adapter) throw new Error(`未知的监控类型：${task.monitor.type}`);
+          return adapter;
+        },
+      });
+    }
+    // Removing a desktop constraint must not leave an ungated source invisible.
+    if (this.options.store.getTask(task.id)?.processPresent !== undefined) {
+      this.options.store.apply(task.id, { processPresent: true, message: '' }, { isSystemEvent: true });
+    }
+    return this.createSourceAdapter(ctx);
+  }
+
+  private createSourceAdapter(ctx: MonitorContext): MonitorAdapter | null {
+    const task = ctx.task;
 
     switch (task.monitor.type) {
       case 'process':
@@ -277,6 +310,14 @@ export class MonitorHost {
   /** 唯一的 store 写入口。 */
   private dispatch(taskId: string, ev: MonitorEvent): void {
     try {
+      if (ev.kind === 'presence') {
+        this.options.store.apply(taskId, {
+          processPresent: ev.present,
+          ...(ev.present ? { message: '程序已启动，正在读取任务状态' }
+            : { status: 'idle' as const, message: '未运行，等待启动' }),
+        }, { isSystemEvent: true });
+        return;
+      }
       if (ev.kind === 'heartbeat') {
         this.options.store.heartbeat(taskId);
         return;
@@ -365,13 +406,9 @@ export class MonitorHost {
     if (!binding) {
       return;
     }
-    try {
-      await binding.adapter.stop(); // 幂等
-    } catch {
-      /* ignore */
-    }
-    this.bindings.delete(taskId);
-    await this.startOne(binding.config);
+    await this.stopBinding(taskId, binding);
+    const current = this.currentConfig.tasks.find(task => task.id === taskId);
+    if (current?.enabled) await this.startOne(current);
   }
 
   /**
@@ -433,12 +470,12 @@ export class MonitorHost {
   }
 
   private async stopBinding(taskId: string, binding: Binding): Promise<void> {
+    if (this.bindings.get(taskId) === binding) this.bindings.delete(taskId);
     try {
       await binding.adapter.stop(); // 幂等
     } catch (err) {
       this.options.logger.warn(`停止任务 ${taskId} 适配器异常：${(err as Error).message}`);
     }
-    this.bindings.delete(taskId);
   }
 
   /** 停止单个任务（面板「暂停」按钮）。 */
@@ -452,7 +489,7 @@ export class MonitorHost {
   /** 启动单个任务（「暂停」后恢复）。 */
   async startTask(taskId: string): Promise<void> {
     const task = this.currentConfig.tasks.find((t) => t.id === taskId);
-    if (task && !this.bindings.has(taskId)) {
+    if (task?.enabled && !this.bindings.has(taskId)) {
       await this.startOne(task);
     }
   }
@@ -480,6 +517,7 @@ export class MonitorHost {
 
   /** 停止全部适配器 + HookServer。**幂等**。 */
   async stopAll(): Promise<void> {
+    this.started = false;
     if (this.healthTimer) {
       clearInterval(this.healthTimer);
       this.healthTimer = null;
@@ -496,7 +534,8 @@ export class MonitorHost {
 
   /** 供测试/诊断：当前活跃的适配器数量。 */
   get activeCount(): number {
-    return this.bindings.size;
+    return [...this.bindings.values()].filter(({ adapter }) =>
+      !(adapter instanceof ProcessPresenceMonitor) || adapter.hasActiveSource).length;
   }
 }
 
@@ -507,7 +546,8 @@ export class MonitorHost {
  * 避免热重载时无意义的适配器重启（架构 §5.3「hash 未变则不动」）。
  */
 export function hashMonitorConfig(task: TaskConfig): string {
-  return stableStringify(task.monitor);
+  const names = desktopProcessNames(task);
+  return names.length ? stableStringify({ monitor: task.monitor, processNames: names }) : stableStringify(task.monitor);
 }
 
 /** 递归按键排序序列化（纯函数，无依赖）。 */

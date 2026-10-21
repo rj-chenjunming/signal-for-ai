@@ -401,6 +401,8 @@ export interface TaskConfig {
 
 /** 任务运行时状态（TaskStore 持有的唯一真相）。 */
 export interface TaskState {
+  /** Confirmed desktop process presence; undefined for ungated sources. */
+  processPresent?: boolean;
   taskId: string;
   /** 主进程推导的显示元数据；旧快照由渲染层兜底。 */
   toolKind?: 'codex' | 'dsh' | 'workbuddy' | 'generic';
@@ -469,6 +471,7 @@ export interface TaskState {
 
 /** 写入 TaskStore 的补丁 —— store.apply() 是唯一写入口。 */
 export interface TaskPatch {
+  processPresent?: boolean;
   status?: TaskStatus;
   message?: string;
   progress?: number;

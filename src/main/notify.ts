@@ -83,7 +83,7 @@ export class Notifier {
         continue; // 不在白名单（如 starting / running / idle）
       }
       const task = snapshot.tasks.find((t) => t.taskId === change.taskId);
-      if (!task) {
+      if (!task || task.processPresent === false) {
         continue;
       }
       this.maybeNotify(task, cfg);

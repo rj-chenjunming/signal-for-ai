@@ -276,6 +276,7 @@ export class TaskStore {
     const counts = this.emptyCounts();
     let runningCount = 0;
     for (const task of all) {
+      if (task.processPresent === false) continue;
       counts[task.status] += 1;
       if ((task.status === 'running' || task.status === 'starting') && !task.paused) {
         runningCount += 1;
@@ -288,7 +289,7 @@ export class TaskStore {
     // 但"有东西失联/失败"这个事实必须反映在总灯颜色上
     // （否则隐藏就变成了掩盖问题，比不显示更危险）。
     const active = all
-      .filter((t) => t.paused !== true && t.enabled !== false)
+      .filter((t) => t.paused !== true && t.enabled !== false && t.processPresent !== false)
       .map((t) => t.status);
 
     // 可显示行数：决定单灯还是灯带（口径见 shared/visibility.ts）
@@ -305,7 +306,7 @@ export class TaskStore {
       // 可显示行数：决定单灯还是灯带（见 shared/visibility.ts）
       stripMode: visibleCount >= 2,
       /** 因失联/失败而被隐藏的行数（面板与 tooltip 用来说明"有几个不在"）。 */
-      hiddenCount: all.filter((t) => isTaskVisible(t) === false && t.enabled !== false && t.paused !== true).length,
+      hiddenCount: all.filter((t) => isTaskVisible(t) === false && t.enabled !== false && t.paused !== true && t.processPresent !== false).length,
       /**
        * 实际要渲染的行 —— 主进程算好，渲染层照着画。
        * 渲染层是 classic script 无法 import 规则，所以过滤只能在主进程做。
@@ -375,7 +376,7 @@ export class TaskStore {
     }
     const at = this.now();
     const from = task.status;
-    const to = patch.status ?? from;
+    const to = patch.processPresent === false ? 'idle' : patch.status ?? from;
 
     // ★ 完成提醒的**确认闸门**。
     //
@@ -438,6 +439,15 @@ export class TaskStore {
     }
 
     this.applyMeta(task, patch);
+    if (patch.processPresent === false) {
+      task.unread = false;
+      task.error = undefined;
+      task.progress = undefined;
+      task.startedAt = undefined;
+      task.endedAt = undefined;
+      task.durationMs = undefined;
+      task.ackedCompletionAt = Math.max(task.ackedCompletionAt ?? 0, task.lastCompletionAt ?? 0, at);
+    }
 
     const change: StateChange = { taskId, from, to, at, mutated: true };
     this.commit([change]);
@@ -445,6 +455,7 @@ export class TaskStore {
   }
 
   private hasMetaChange(task: TaskState, patch: TaskPatch): boolean {
+    if (patch.processPresent !== undefined && patch.processPresent !== task.processPresent) return true;
     if (patch.completionAt !== undefined && patch.completionAt > (task.lastCompletionAt ?? 0)) return true;
     if (patch.message !== undefined && patch.message !== task.message) return true;
     if (patch.progress !== undefined && patch.progress !== task.progress) return true;
@@ -453,6 +464,7 @@ export class TaskStore {
   }
 
   private applyMeta(task: TaskState, patch: TaskPatch): void {
+    if (patch.processPresent !== undefined) task.processPresent = patch.processPresent;
     if (patch.message !== undefined) {
       task.message = patch.message;
     }
@@ -486,7 +498,7 @@ export class TaskStore {
 
     for (const id of this.order) {
       const task = this.tasks.get(id);
-      if (!task || task.paused) {
+      if (!task || task.paused || task.processPresent === false) {
         continue;
       }
       const since = this.statusSince.get(id) ?? task.lastSignalAt;

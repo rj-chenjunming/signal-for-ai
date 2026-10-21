@@ -56,6 +56,7 @@ export function isVisibleStatus(status: TaskStatus): boolean {
 
 /** 可显示判定所需的最小任务形状（放宽入参，便于纯函数测试）。 */
 export interface VisibilityInput {
+  readonly processPresent?: boolean;
   /**
    * 运行时状态。
    *
@@ -89,7 +90,7 @@ export interface VisibilityInput {
  * `status` 缺失时按"可见"处理（配置侧估算用）。
  */
 export function isTaskVisible(task: VisibilityInput): boolean {
-  if (task.enabled === false || task.paused === true) {
+  if (task.enabled === false || task.paused === true || task.processPresent === false) {
     return false;
   }
   return task.status === undefined || isVisibleStatus(task.status);

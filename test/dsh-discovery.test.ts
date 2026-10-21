@@ -3,12 +3,13 @@
  *
  * 分两部分：
  *   1. 纯函数部分（netstat 解析、候选合并/去重、分类）—— 用注入的探针，确定性
- *   2. 真实扫描部分 —— 真的枚举本机端口、真的探 3080，验证端到端可用
- *
- * 注意第 2 部分依赖本机确实有 dsh web 在跑；若没有则跳过（不误报失败）。
+ *   2. 真实端口/HTTP集成 —— 自建临时标记服务，不要求私人dsh保持运行。
+ *      这是协议夹具，不替代真实dsh桌面验收。
  */
 
 import { describe, expect, it } from 'vitest';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 import { parseNetstatOutput, discoverDshInstances, enumerateListeners } from '../src/main/monitors/dsh-discovery';
 
 describe('parseNetstatOutput', () => {
@@ -171,8 +172,15 @@ describe('discoverDshInstances —— 注入探针，确定性', () => {
   });
 });
 
-describe('discoverDshInstances —— 真实扫描本机', () => {
-  it('能在本机发现至少一个 dsh web（若无则明确记录而不是假通过）', async () => {
+describe('discoverDshInstances —— 真实端口/HTTP夹具', () => {
+  it('自动发现自建标记服务且分类自洽，不依赖私人dsh在线', async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html>__DSH_BOOT__</html>');
+    });
+    server.listen(0, '127.0.0.1'); await once(server, 'listening');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('fixture listener missing');
+    try {
     const result = await discoverDshInstances({ onProgress: () => undefined });
 
     if (result.listenerError !== undefined) {
@@ -181,10 +189,12 @@ describe('discoverDshInstances —— 真实扫描本机', () => {
       return;
     }
 
-    // 本机实测有 dsh web 在跑（3080 / 13080）。若这条断言失败，
-    // 说明分类逻辑回归了，而不是"环境没起服务"—— 用 probedCount 佐证确实扫了。
+    // 只有测试拥有的HTTP夹具可以作为确定的发现预期。
     expect(result.probedCount).toBeGreaterThan(0);
     expect(result.instances.length).toBeGreaterThan(0);
+    expect(result.instances).toContainEqual(expect.objectContaining({
+      authority: `127.0.0.1:${address.port}`, origin: 'auto', kind: 'local', status: 200,
+    }));
 
     for (const inst of result.instances) {
       expect(inst.authority).toMatch(/^[\d.]+:\d+$/u);
@@ -193,5 +203,6 @@ describe('discoverDshInstances —— 真实扫描本机', () => {
       if (inst.kind === 'local') expect(inst.status).toBe(200);
       else expect(inst.status).toBe(401);
     }
+    } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
   }, 120_000);
 });

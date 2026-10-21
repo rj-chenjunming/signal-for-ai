@@ -57,9 +57,9 @@ it('validates HWND ownership and reads the existing process executable before ha
 
 it('keeps Win32 focus and PID guards for other desktop tools', async () => {
   const other: TaskConfig = { ...task, monitor: {type:'webhook',listen:'127.0.0.1',path:'/hook'},
-    jump:{terminal:{type:'windowProcess',processNames:['WorkBuddy.exe']}} };
+    jump:{terminal:{type:'windowProcess',processNames:['ExampleEditor.exe']}} };
   const exec=vi.fn(async (_cmd:string,args:string[])=>ok(args.at(-1)?.includes('LAMPFOCUS') ? 'LAMPFOCUS ok=True' :
-    JSON.stringify({...hidden,ProcessName:'WorkBuddy',MainWindowTitle:'WorkBuddy'})));
+    JSON.stringify({...hidden,ProcessName:'ExampleEditor',MainWindowTitle:'ExampleEditor'})));
   const service=new FocusService({spawner:{exec,spawn:vi.fn(()=>true)},tasks:()=>[other]});
   expect((await service.focusTerminal(other,other.jump)).ok).toBe(true);
   const activation=exec.mock.calls.find(([,args])=>args.at(-1)?.includes('LAMPFOCUS'))?.[1].at(-1) ?? '';

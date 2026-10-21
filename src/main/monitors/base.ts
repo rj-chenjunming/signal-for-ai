@@ -21,6 +21,7 @@ import type { TaskStatus } from '../../shared/types';
  * 只更新面板上的进度展示，因此单独成字段而不是塞进 status 的 message。
  */
 export type MonitorEvent =
+  | { kind: 'presence'; present: boolean; at: number }
   | {
       kind: 'status';
       status: TaskStatus;

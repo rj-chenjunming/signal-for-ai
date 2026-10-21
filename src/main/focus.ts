@@ -41,7 +41,7 @@
 
 import { spawn } from 'node:child_process';
 import { buildHiddenWindowScript, parseHiddenWindow } from './hidden-window';
-import { buildDshNativeRevealScript } from './dsh-native-reveal';
+import { buildNativeWindowRevealScript, NATIVE_WINDOW_APPS, type NativeWindowApp } from './native-window-reveal';
 
 import {
   FOCUS_LEVELS,
@@ -465,20 +465,21 @@ export class FocusService {
     }
   }
 
-  private async revealDshWindow(win: TerminalWindow): Promise<boolean> {
+  private async revealNativeWindow(win: TerminalWindow, app: NativeWindowApp): Promise<boolean> {
     if (win.pid === null || win.hwnd === null) return false;
+    const profile = NATIVE_WINDOW_APPS[app];
     try {
       const result = await this.spawner.exec('powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-Command', buildDshNativeRevealScript(win.pid, win.hwnd)], this.focusTimeoutMs);
-      if (!result.ok || !result.stdout.includes('LAMPDSHREVEAL ok=True')) {
-        this.logger.warn('dsh 自身窗口恢复失败或超时，未强制显示');
+        ['-NoProfile', '-NonInteractive', '-Command', buildNativeWindowRevealScript(win.pid, win.hwnd, app)], this.focusTimeoutMs);
+      if (!result.ok || !result.stdout.includes(profile.marker)) {
+        this.logger.warn(`${profile.label} 自身窗口恢复失败或超时，未强制显示`);
         return false;
       }
       const confirmed = await this.verifyForeground(win.hwnd);
-      this.logger.info(confirmed ? 'dsh 自身恢复成功，前台 HWND 已确认' : 'dsh 自身恢复后未确认前台 HWND');
+      this.logger.info(confirmed ? `${profile.label} 自身恢复成功，前台 HWND 已确认` : `${profile.label} 自身恢复后未确认前台 HWND`);
       return confirmed;
     } catch {
-      this.logger.warn('dsh 自身窗口恢复不可用（已隔离，未强制显示）');
+      this.logger.warn(`${profile.label} 自身窗口恢复不可用（已隔离，未强制显示）`);
       return false;
     }
   }
@@ -738,10 +739,14 @@ export class FocusService {
       if (win === null && terminal.type === 'windowProcess') {
         win = await this.findHiddenWindow(terminal.processNames, title);
       }
-      const activate = (candidate: TerminalWindow): Promise<boolean> =>
-        terminal.type === 'windowProcess' && task.monitor.type === 'dsh' &&
-        normalizeProcessName(candidate.processName) === 'deepseek harness'
-          ? this.revealDshWindow(candidate) : this.focusExistingWindow(candidate);
+      const activate = (candidate: TerminalWindow): Promise<boolean> => {
+        if (terminal.type === 'windowProcess') {
+          const name = normalizeProcessName(candidate.processName);
+          if (name === 'workbuddy') return this.revealNativeWindow(candidate, 'workbuddy');
+          if (name === 'deepseek harness' && task.monitor.type === 'dsh') return this.revealNativeWindow(candidate, 'dsh');
+        }
+        return this.focusExistingWindow(candidate);
+      };
       let activated = win !== null && await activate(win);
       if (win !== null && !activated) {
         const oldHwnd = win.hwnd;

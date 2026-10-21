@@ -93,3 +93,15 @@ it('SPEC-013 first-open pending feedback appears as plain text', async () => {
   expect(f.root.querySelector('.panel-toast')?.textContent).toBe('未找到 dsh 主窗口 <b>请先打开工具</b>');
   expect(f.root.querySelector('.panel-toast')?.children).toHaveLength(0);
 });
+
+it('SPEC-017 absent tool is waiting to start, with no retry/focus action until it returns', async () => {
+  const f = await fixture();
+  f.store.apply('codex', { processPresent: false, message: '未运行，等待启动' }); f.update();
+  const row = f.get('panel-list').children[0];
+  expect(row.querySelector('.task-status-label')?.textContent).toBe('未运行');
+  row.click(); row.querySelector('[data-action="focus_terminal"]')!.click(); await settle();
+  expect(f.send).not.toHaveBeenCalled();
+  expect(row.querySelector('[data-action="retry"]')?.disabled).toBe(true);
+  f.store.apply('codex', { processPresent: true, status: 'running' }); f.update();
+  expect(row.querySelector('[data-action="focus_terminal"]')?.disabled).toBe(false);
+});

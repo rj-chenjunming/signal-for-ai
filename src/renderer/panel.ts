@@ -247,8 +247,8 @@ function updateRow(row: HTMLElement, task: AiTaskState): void {
   }
 
   const paused = task.paused || currentSnapshot?.paused === true;
-  if (!task.enabled || paused) {
-    statusLabel.textContent = !task.enabled ? '已停用' : '监控已暂停';
+  if (!task.enabled || paused || task.processPresent === false) {
+    statusLabel.textContent = !task.enabled ? '已停用' : paused ? '监控已暂停' : '未运行';
     statusLabel.style.color = 'var(--panel-muted)';
     elapsed.textContent = '';
   }
@@ -256,7 +256,8 @@ function updateRow(row: HTMLElement, task: AiTaskState): void {
   for (const action of ROW_ACTIONS) {
     const button = row.querySelector(`[data-action="${action.id}"]`) as HTMLButtonElement;
     button.hidden = !available.includes(action.id) || (action.id === 'mark_read' && !task.unread);
-    button.disabled = action.id === 'retry' && (!task.enabled || paused);
+    button.disabled = (action.id === 'retry' && (!task.enabled || paused)) ||
+      (task.processPresent === false && (action.id === 'retry' || action.id === 'focus_terminal'));
     button.title = `${action.label}：${task.name}`;
   }
 }
@@ -276,6 +277,7 @@ function renderPausedHint(snapshot: AiSnapshot): void {
  * ==========================================================================*/
 
 async function handleAction(taskId: string, action: AiTaskAction): Promise<void> {
+  if (action === 'focus_terminal' && currentSnapshot?.tasks.find(task => task.taskId === taskId)?.processPresent === false) return;
   try {
     const res = await api?.sendTaskAction({ taskId, action });
     if (res && !res.ok && res.message) {

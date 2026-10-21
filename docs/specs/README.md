@@ -5,6 +5,9 @@
 | Spec ID | 文档 | 类型 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
 | BASELINE-000 | [当前基线](000-baseline.md) | 接管现状 | observed | 从当前提交核对，不补造历史 TDD |
+| SPEC-017 | [桌面工具存在时才监控](017-desktop-process-presence.md) | 修复/行为 | ready | 确认退出则停源、不红、隐藏灯行，重新出现自动恢复；保留真实故障，待Red/Green |
+| SPEC-016 | [Windows双击启动入口](016-desktop-start-script.md) | 新能力 | done | 824项/类型/构建/smoke通过；真实cmd从其他目录启动及单实例复用通过，保留配置与自动运行时回退 |
+| SPEC-015 | [WorkBuddy 恢复后可关闭到后台](015-workbuddy-native-window-reveal.md) | 修复 | done | 824项最终回归；真实自身恢复前台确认，用户确认X后台、原主PID仍在且HWND=0 |
 | SPEC-014 | [dsh 恢复后保留正常关闭](014-dsh-native-window-reveal.md) | 修复 | verifying | 803项/类型/构建/smoke通过；真实自身恢复前台确认，用户确认 X 可隐藏；多轮及面板触发矩阵待补 |
 | SPEC-013 | [桌面跳转失败与窄灯条反馈](013-focus-failure-feedback.md) | 修复 | verifying | 789项与一次隐藏恢复通过；用户确认恢复但 X 无效，dsh 生命周期问题交 SPEC-014，完整矩阵仍待补 |
 | SPEC-012 | [轻量桌面 UI 与面板操作](012-lightweight-desktop-ui.md) | UI / 交互 | verifying | 用户确认鲸鱼/小猫/机器人已接入；任务卡片/真实暂停；完整 DPI/多屏矩阵待补 |

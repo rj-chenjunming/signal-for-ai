@@ -26,6 +26,8 @@ npm run build
 
 SPEC-013/014：显式进程目标不存在普通主窗口时，限定到该进程查找唯一的隐藏 Electron 主窗口，排除辅助/owned/空标题和歧义候选。dsh＋DeepSeek Harness 目标通过已运行进程的真实安装程序单实例入口让 dsh 自己 show/focus，再确认前台 HWND，避免直接 ShowWindow 后 dsh 的 X 无效；未运行或身份/路径验证失败不尝试启动。2026-10-21 原生恢复前台已确认，用户确认 X 可以隐藏到后台；多轮及面板触发矩阵仍待验收，见 [SPEC-014](../specs/014-dsh-native-window-reveal.md)。
 
+SPEC-015将WorkBuddy进程目标也改为自身单实例恢复，保留归属/路径校验和失败关闭；2026-10-21真实前台确认后，用户确认X可后台，原主PID仍在且HWND=0。其他工具仍沿用原策略。根目录[启动指示灯.cmd](../../启动指示灯.cmd)提供双击入口，使用现有本地配置，按需构建和校验同版本临时运行时；再次运行复用原实例，见[SPEC-016](../specs/016-desktop-start-script.md)。
+
 ```powershell
 # 只查看顶层窗口对应的进程，不修改三个应用
 Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object Id, ProcessName, MainWindowTitle
