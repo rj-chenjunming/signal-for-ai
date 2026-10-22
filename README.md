@@ -408,11 +408,12 @@ dsh 与 sqlite 型的完整示例见 [`config.dsh.example.yaml`](./config.dsh.ex
 - **已完成**：沉到列表底部的折叠区，仍可回看与删除。
 - **导出**：右上角「导出」把全部目标与记录写成 Markdown 文件（系统保存对话框，默认 `goals-YYYY-MM-DD.md`）。
 - **数据**：`%APPDATA%\ai-task-indicator\goals.json`（与 `config.yaml` 分开）；写盘防抖、退出前 flush、原子替换；文件损坏时保留原文件并尝试 `.bak`，不会静默清空。
+- **开发同步**：`node scripts/goal-sync.mjs --goal "AI信号灯软件开发" --text "..."` 会把一条进展写入 `goal-inbox.jsonl`，运行中的应用约 1 秒内导入（未运行则下次启动导入）；详见 [SPEC-027](./docs/specs/027-goal-progress-sync.md)。
 - **窗口行为**：560×640、无边框置顶、失焦**不**隐藏；`Esc` / `✕` 只隐藏窗口，下次打开内容还在。
 
 ![悬浮灯上的目标行](./deliverables/goals-overlay.png)
 
-不做周视图、子任务、提醒、云同步、拖拽排序、JSON 导入导出（见 [SPEC-024](./docs/specs/024-goals.md) 与 [SPEC-025](./docs/specs/025-overlay-goals-row.md) 非目标）。
+不做周视图、子任务、提醒、云同步、JSON 导入导出（见 [SPEC-024](./docs/specs/024-goals.md)、[SPEC-025](./docs/specs/025-overlay-goals-row.md)、[SPEC-026](./docs/specs/026-goal-reorder.md) 与 [SPEC-027](./docs/specs/027-goal-progress-sync.md) 非目标）。
 
 ---
 

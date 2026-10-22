@@ -10,7 +10,7 @@
  * 托盘菜单与系统级焦点仍需 Windows 真机人工验收。
  */
 const { app } = require('electron');
-const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
+const { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const assert = require('node:assert/strict');
@@ -18,6 +18,7 @@ const assert = require('node:assert/strict');
 const { GoalsStore } = require('../dist/main/goals-store.js');
 const { GoalsWindow } = require('../dist/main/goals-window.js');
 const { createGoalsHandlers } = require('../dist/main/goals-ipc.js');
+const { drainGoalInbox } = require('../dist/main/goals-inbox.js');
 const { registerIpcHandlers } = require('../dist/main/ipc.js');
 
 const logger = {
@@ -243,7 +244,22 @@ app.whenReady().then(async () => {
     // 拖拽后的顺序在文件中保留：第一条仍是先创建的目标。
     assert.equal(view.goals[0].id, goalId);
 
-    console.log('PASS: goals window real Electron/IPC integration (add → progress → entry → complete → export → hide → reopen → reload)');
+    // SPEC-027：收件箱导入一条进展，时间线立即出现并清空收件箱。
+    const inboxPath = path.join(dir, 'goal-inbox.jsonl');
+    writeFileSync(
+      inboxPath,
+      `${JSON.stringify({ goal: '把 AI 任务指示灯做出来', kind: 'progress', text: 'CLI 同步进来的一条进展' })}\n`,
+      'utf8',
+    );
+    const drained = drainGoalInbox({ inboxPath, store });
+    assert.equal(drained.applied, 1);
+    assert.equal(drained.failed, 0);
+    assert.equal(existsSync(inboxPath), false);
+    const synced = store.getView().goals.find((goal) => goal.id === goalId);
+    assert.equal(synced.entries[0].text, 'CLI 同步进来的一条进展');
+    assert.equal(synced.entries[0].kind, 'progress');
+
+    console.log('PASS: goals window real Electron/IPC integration (add → progress → entry → complete → export → hide → reopen → reload → inbox sync)');
     process.exitCode = 0;
   } catch (err) {
     console.error(err);

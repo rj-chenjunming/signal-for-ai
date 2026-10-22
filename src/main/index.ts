@@ -33,6 +33,7 @@ import { PanelWindow } from './panel';
 import { broadcastToast, pushPlaySound, registerIpcHandlers } from './ipc';
 import { GoalsStore, summarizeGoals } from './goals-store';
 import { GoalsWindow } from './goals-window';
+import { GoalInboxPoller } from './goals-inbox';
 import { createGoalsHandlers } from './goals-ipc';
 import { Notifier } from './notify';
 import { FocusService } from './focus';
@@ -80,6 +81,8 @@ interface AppRefs {
   /** SPEC-024：目标清单（独立数据文件，与任务状态机无关）。 */
   goalsStore: GoalsStore;
   goalsWindow: GoalsWindow;
+  /** SPEC-027：目标进展文件收件箱轮询器。 */
+  goalsInbox: GoalInboxPoller;
   tickTimer: NodeJS.Timeout | null;
   quitting: boolean;
   /** 真正退出前的清理钩子。 */
@@ -103,6 +106,7 @@ const refs: AppRefs = {
   autolaunch: null as unknown as AutoLaunchService,
   goalsStore: null as unknown as GoalsStore,
   goalsWindow: null as unknown as GoalsWindow,
+  goalsInbox: null as unknown as GoalInboxPoller,
   tickTimer: null,
   quitting: false,
   cleanup: async () => undefined,
@@ -254,6 +258,15 @@ async function startApplication(): Promise<void> {
   };
   goalsStore.onChange(syncGoalsSummary);
   syncGoalsSummary(goalsStore.getView());
+
+  // SPEC-027：本地进展收件箱（CLI 写入，应用轮询导入）。
+  const goalsInbox = new GoalInboxPoller({
+    inboxPath: path.join(app.getPath('userData'), 'goal-inbox.jsonl'),
+    store: goalsStore,
+    logger,
+  });
+  refs.goalsInbox = goalsInbox;
+  goalsInbox.start();
 
   /* -------- 5-7) 窗口与托盘 -------- */
   const panel = new PanelWindow({
@@ -464,6 +477,7 @@ async function startApplication(): Promise<void> {
     overlay.destroy();
     panel.destroy();
     // SPEC-024：目标数据必须先 flush 再销毁窗口；防抖窗口内的改动不能丢。
+    refs.goalsInbox.stop();
     try {
       refs.goalsStore.flush();
       refs.goalsStore.dispose();

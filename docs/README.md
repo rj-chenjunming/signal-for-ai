@@ -23,6 +23,16 @@
 - 工作方式：`development/spec-tdd.md` 与根 `AGENTS.md`。
 - 规格、实现或历史结论冲突时，登记差异并核实需求来源；不得为了让测试通过而擅自改需求，也不得照搬有缺陷的实现当作目标规格。
 
+## 开发进展同步
+
+每个 SPEC 完成或重要修复后，用以下命令把进展写入应用目标清单里的「AI信号灯软件开发」（应用运行中约 1 秒导入，未运行则下次启动导入）：
+
+```bash
+node scripts/goal-sync.mjs --goal "AI信号灯软件开发" --kind progress --text "SPEC-0NN …"
+```
+
+`--kind issue` 用于问题记录；实现与边界见 [SPEC-027](specs/027-goal-progress-sync.md)。这是项目工作流约定，后续 AI/开发者按此同步，不再手动改 `goals.json`。
+
 ## 历史资料
 
 | 文档 | 当前定位 |
