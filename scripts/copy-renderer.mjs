@@ -30,7 +30,7 @@ mkdirSync(rendererOut, { recursive: true });
 cpSync(rendererCompiled, rendererOut, { recursive: true, force: true });
 
 // 2) 复制静态资源（.html / .css）
-for (const file of ['overlay.html', 'panel.html', 'shared.css']) {
+for (const file of ['overlay.html', 'panel.html', 'goals.html', 'shared.css', 'goals.css']) {
   const from = join(rendererSrc, file);
   if (existsSync(from)) {
     cpSync(from, join(rendererOut, file), { force: true });

@@ -21,9 +21,10 @@ import {
   statusRank,
 } from '../shared/constants';
 // 浮窗「显示哪些行」的共享口径 —— 必须与渲染层用同一份，否则窗口尺寸会错位
-import { countVisibleTasks, isTaskVisible } from '../shared/visibility';
+import { countVisibleTasks, isTaskVisible, shouldShowStrip } from '../shared/visibility';
 import type {
   AppConfig,
+  GoalsSummary,
   Snapshot,
   StateChange,
   StateTimeoutDefaults,
@@ -214,6 +215,8 @@ export class TaskStore {
   private notifyPrefs = { popup: true, sound: true };
   /** 悬浮灯是否鼠标穿透（D10「锁定/穿透」，托盘菜单可切）。 */
   private clickThrough = false;
+  /** 目标摘要（SPEC-025）：只用于浮窗「目标」行，不参与七态状态机。 */
+  private goalsSummary: GoalsSummary | undefined;
   private version = 0;
   private snapshotCache: Snapshot | null = null;
 
@@ -304,6 +307,8 @@ export class TaskStore {
 
     // 可显示行数：决定单灯还是灯带（口径见 shared/visibility.ts）
     const visibleCount = countVisibleTasks(all);
+    // SPEC-025：有进行中目标时，浮窗多一行「目标」，即使任务不足 2 行也要灯带。
+    const goalRowCount = this.goalsSummary && this.goalsSummary.active > 0 ? 1 : 0;
 
     const snapshot: Snapshot = {
       aggregate: computeAggregate(active),
@@ -313,8 +318,10 @@ export class TaskStore {
       paused: this.paused,
       notify: { ...this.notifyPrefs },
       version: this.version,
-      // 可显示行数：决定单灯还是灯带（见 shared/visibility.ts）
-      stripMode: visibleCount >= 2,
+      // 可显示行数 + 目标行：决定单灯还是灯带（见 shared/visibility.ts）
+      stripMode: shouldShowStrip(visibleCount, goalRowCount),
+      /** SPEC-025：浮窗「目标」行的聚合数据；undefined/active=0 时不显示目标行。 */
+      goalsSummary: this.goalsSummary,
       /** 因失联/失败而被隐藏的行数（面板与 tooltip 用来说明"有几个不在"）。 */
       hiddenCount: all.filter((t) => isTaskVisible(t) === false && t.enabled !== false && t.paused !== true && t.processPresent !== false).length,
       /**
@@ -669,6 +676,30 @@ export class TaskStore {
 
   setNotifyPrefs(prefs: { popup: boolean; sound: boolean }): void {
     this.notifyPrefs = { ...prefs };
+    this.commit([]);
+  }
+
+  /**
+   * 同步目标摘要（SPEC-025）。
+   *
+   * 目标不是任务运行态，**不进入**七态状态机；这里只把「悬浮灯目标行」
+   * 需要的聚合值带进快照，供 OverlayWindow 计算行数与渲染层绘制。
+   *
+   * 值没变时直接返回，避免每次目标变更都把灯带版本推一遍。
+   */
+  setGoalsSummary(summary: GoalsSummary | undefined): void {
+    const previous = this.goalsSummary;
+    if (
+      previous === summary ||
+      (previous !== undefined &&
+        summary !== undefined &&
+        previous.active === summary.active &&
+        previous.done === summary.done &&
+        previous.progress === summary.progress)
+    ) {
+      return;
+    }
+    this.goalsSummary = summary;
     this.commit([]);
   }
 

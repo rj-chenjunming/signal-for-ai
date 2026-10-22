@@ -5,7 +5,7 @@
  *
  * 【安全约定】（架构 §1.2）
  *  - `nodeIntegration: false` + `contextIsolation: true`，渲染层**无任何 Node 能力**；
- *  - 只暴露 §4.3 白名单里的 7 个方法 + 3 个订阅函数，不 open 整个 ipcRenderer；
+ *  - 只暴露契约里的方法 + 订阅函数，不 open 整个 ipcRenderer；
  *  - 渲染层是 file:// 加载的本地可信页面，但依然走白名单以防配置注入。
  *
  * 共享类型：RendererApi（shared/ipc-contract）—— 主进程与渲染层对同一份契约编译，
@@ -22,6 +22,9 @@ import {
 } from '../shared/ipc-contract';
 import type {
   FocusResult,
+  GoalEntryKind,
+  GoalExportResult,
+  GoalsView,
   LampLayout,
   NotifyActionId,
   PlaySoundRequest,
@@ -31,12 +34,18 @@ import type {
   TaskActionResponse,
 } from '../shared/types';
 
-/** 判断当前渲染层是哪个窗口（overlay / panel），由 HTML 上的 data 属性决定。 */
-function detectRole(): 'overlay' | 'panel' {
+/** 判断当前渲染层是哪个窗口（overlay / panel / goals），由 HTML 上的 data 属性决定。 */
+function detectRole(): 'overlay' | 'panel' | 'goals' {
   try {
     const el = document.querySelector('[data-indicator-role]');
     const value = el?.getAttribute('data-indicator-role');
-    return value === 'panel' ? 'panel' : 'overlay';
+    if (value === 'panel') {
+      return 'panel';
+    }
+    if (value === 'goals') {
+      return 'goals';
+    }
+    return 'overlay';
   } catch {
     return 'overlay';
   }
@@ -83,6 +92,30 @@ const api: RendererApi = {
   reprobeTerminal: (): Promise<ProbeTerminalResponse> =>
     ipcRenderer.invoke(IPC.REPROBE_TERMINAL),
 
+  /* ---- SPEC-024：目标清单 ---- */
+  getGoals: (): Promise<GoalsView> => ipcRenderer.invoke(IPC.GOALS_GET),
+  addGoal: (title: string): Promise<TaskActionResponse> =>
+    ipcRenderer.invoke(IPC.GOALS_ADD, { title }),
+  deleteGoal: (id: string): Promise<TaskActionResponse> =>
+    ipcRenderer.invoke(IPC.GOALS_DELETE, { id }),
+  updateGoalTitle: (id: string, title: string): Promise<TaskActionResponse> =>
+    ipcRenderer.invoke(IPC.GOALS_UPDATE_TITLE, { id, title }),
+  setGoalProgress: (id: string, progress: number): Promise<TaskActionResponse> =>
+    ipcRenderer.invoke(IPC.GOALS_SET_PROGRESS, { id, progress }),
+  completeGoal: (id: string): Promise<TaskActionResponse> =>
+    ipcRenderer.invoke(IPC.GOALS_COMPLETE, { id }),
+  addGoalEntry: (
+    goalId: string,
+    kind: GoalEntryKind,
+    text: string,
+  ): Promise<TaskActionResponse> =>
+    ipcRenderer.invoke(IPC.GOALS_ADD_ENTRY, { goalId, kind, text }),
+  deleteGoalEntry: (goalId: string, entryId: string): Promise<TaskActionResponse> =>
+    ipcRenderer.invoke(IPC.GOALS_DELETE_ENTRY, { goalId, entryId }),
+  exportGoals: (): Promise<GoalExportResult> => ipcRenderer.invoke(IPC.GOALS_EXPORT),
+  hideGoals: (): Promise<void> => ipcRenderer.invoke(IPC.GOALS_HIDE),
+  openGoals: (): Promise<TaskActionResponse> => ipcRenderer.invoke(IPC.OPEN_GOALS),
+
   onSnapshot: (cb: (snapshot: Snapshot) => void): (() => void) =>
     subscribe<Snapshot>(IPC_PUSH.SNAPSHOT, cb),
 
@@ -94,6 +127,9 @@ const api: RendererApi = {
 
   onLayout: (cb: (layout: LampLayout) => void): (() => void) =>
     subscribe<LampLayout>(IPC_PUSH.LAYOUT, cb),
+
+  onGoals: (cb: (view: GoalsView) => void): (() => void) =>
+    subscribe<GoalsView>(IPC_PUSH.GOALS_CHANGED, cb),
 
   role: detectRole(),
 };

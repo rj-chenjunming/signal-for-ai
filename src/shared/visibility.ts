@@ -104,3 +104,17 @@ export function countVisibleTasks(tasks: readonly VisibilityInput[]): number {
   }
   return n;
 }
+
+/**
+ * 是否使用灯带形态（SPEC-025 扩展）。
+ *
+ * 原有规则：可显示任务 ≥ 2 行才用灯带（否则缩成一颗单灯）。
+ * 目标行（悬浮灯上的「目标」入口）计入行数：
+ *   - 有进行中的目标时，即使只有 0/1 个任务，也要用灯带把目标行显示出来；
+ *   - 没有目标行时保持原规则，避免影响既有单灯/灯带行为。
+ *
+ * 主进程 `TaskStore` 与 `OverlayWindow` 共用这一口径，防止窗口尺寸与内容错位。
+ */
+export function shouldShowStrip(visibleTaskCount: number, goalRowCount: number): boolean {
+  return goalRowCount > 0 || visibleTaskCount >= 2;
+}

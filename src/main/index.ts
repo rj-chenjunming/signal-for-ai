@@ -31,6 +31,9 @@ import { TrayController } from './tray';
 import { OverlayWindow } from './overlay';
 import { PanelWindow } from './panel';
 import { broadcastToast, pushPlaySound, registerIpcHandlers } from './ipc';
+import { GoalsStore, summarizeGoals } from './goals-store';
+import { GoalsWindow } from './goals-window';
+import { createGoalsHandlers } from './goals-ipc';
 import { Notifier } from './notify';
 import { FocusService } from './focus';
 import { ExtensionBridge } from './extension-bridge';
@@ -43,6 +46,8 @@ import type {
   AppConfig,
   ConfigReloadOutcome,
   FocusResult,
+  GoalExportResult,
+  GoalsView,
   NotifyActionId,
   NotifySettings,
   TaskAction,
@@ -72,6 +77,9 @@ interface AppRefs {
   /** D2 仲裁器：插件精确信号与轮询采集的合并点。 */
   arbiter: DshSignalArbiter;
   autolaunch: AutoLaunchService;
+  /** SPEC-024：目标清单（独立数据文件，与任务状态机无关）。 */
+  goalsStore: GoalsStore;
+  goalsWindow: GoalsWindow;
   tickTimer: NodeJS.Timeout | null;
   quitting: boolean;
   /** 真正退出前的清理钩子。 */
@@ -93,6 +101,8 @@ const refs: AppRefs = {
   /** D2 仲裁器：插件精确信号与轮询采集的合并点。 */
   arbiter: null as unknown as DshSignalArbiter,
   autolaunch: null as unknown as AutoLaunchService,
+  goalsStore: null as unknown as GoalsStore,
+  goalsWindow: null as unknown as GoalsWindow,
   tickTimer: null,
   quitting: false,
   cleanup: async () => undefined,
@@ -220,6 +230,31 @@ async function startApplication(): Promise<void> {
   const store = TaskStore.fromAppConfig(config, { logger });
   refs.store = store;
 
+  /* -------- 4b) 目标清单（SPEC-024） -------- */
+  // 独立于 TaskStore：不参与七态状态机、可见性过滤或聚合灯；
+  // 数据落在 userData/goals.json，损坏时隔离而不是覆盖（见 goals-store）。
+  const goalsStore = new GoalsStore({
+    filePath: path.join(app.getPath('userData'), 'goals.json'),
+    logger,
+  });
+  refs.goalsStore = goalsStore;
+  const goalsWindow = new GoalsWindow({ logger });
+  refs.goalsWindow = goalsWindow;
+  const goalsHandlers = createGoalsHandlers(goalsStore, {
+    openGoals: () => goalsWindow.show(),
+    hideGoals: () => goalsWindow.hide(),
+    exportMarkdown: (markdown, suggestedName) =>
+      exportGoalsMarkdown(markdown, suggestedName),
+  });
+  // SPEC-025：把目标摘要带进快照，悬浮灯据此渲染「目标」行。
+  // 目标列表本身仍只推给目标窗口；TaskStore 只持有聚合值，不参与状态机。
+  const syncGoalsSummary = (view: GoalsView): void => {
+    goalsWindow.setView(view);
+    store.setGoalsSummary(summarizeGoals(view));
+  };
+  goalsStore.onChange(syncGoalsSummary);
+  syncGoalsSummary(goalsStore.getView());
+
   /* -------- 5-7) 窗口与托盘 -------- */
   const panel = new PanelWindow({
     logger,
@@ -291,6 +326,7 @@ async function startApplication(): Promise<void> {
       onTogglePanel: () => panel.toggle(),
       onOpenPanel: () => panel.show(),
       onTogglePause: (paused) => void togglePause(paused),
+      onOpenGoals: () => goalsWindow.show(),
       onToggleNotify: (field, value) => toggleNotify(field, value),
       onToggleClickThrough: (value) => toggleClickThrough(value),
       onOpenConfig: () => openConfigFile(),
@@ -325,6 +361,18 @@ async function startApplication(): Promise<void> {
       },
       quit: () => quitApp(),
       reprobeTerminal: () => reprobeTerminal(),
+      /* ---- SPEC-024：目标清单 ---- */
+      goalsGet: goalsHandlers.get,
+      goalsAdd: goalsHandlers.add,
+      goalsRemove: goalsHandlers.remove,
+      goalsUpdateTitle: goalsHandlers.updateTitle,
+      goalsSetProgress: goalsHandlers.setProgress,
+      goalsComplete: goalsHandlers.complete,
+      goalsAddEntry: goalsHandlers.addEntry,
+      goalsDeleteEntry: goalsHandlers.deleteEntry,
+      goalsExport: goalsHandlers.export,
+      goalsHide: goalsHandlers.hide,
+      openGoals: goalsHandlers.open,
     },
     logger,
   );
@@ -414,6 +462,14 @@ async function startApplication(): Promise<void> {
     tray.destroy();
     overlay.destroy();
     panel.destroy();
+    // SPEC-024：目标数据必须先 flush 再销毁窗口；防抖窗口内的改动不能丢。
+    try {
+      refs.goalsStore.flush();
+      refs.goalsStore.dispose();
+    } catch (err) {
+      logger.warn(`目标数据落盘失败：${(err as Error).message}`);
+    }
+    refs.goalsWindow.destroy();
   };
 
   app.on('window-all-closed', () => {
@@ -422,6 +478,49 @@ async function startApplication(): Promise<void> {
   });
 
   logger.info('AI 任务指示灯启动完成');
+}
+
+/* ============================================================================
+ * 目标导出（SPEC-024 / AC-15 ~ AC-17）
+ * ==========================================================================*/
+
+/**
+ * 弹出系统保存对话框并把 Markdown 写入用户选择的位置。
+ *
+ * 取消与失败必须分开：取消是正常路径，不弹错误；
+ * 失败只影响本次导出，内存数据与窗口保持可用（AC-17）。
+ */
+async function exportGoalsMarkdown(
+  markdown: string,
+  suggestedName: string,
+): Promise<GoalExportResult> {
+  try {
+    let defaultPath = suggestedName;
+    try {
+      defaultPath = path.join(app.getPath('documents'), suggestedName);
+    } catch {
+      // 某些精简环境没有 documents 目录；退回纯文件名，让对话框自己决定位置。
+    }
+    const options: Electron.SaveDialogOptions = {
+      title: '导出目标清单',
+      defaultPath,
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    };
+    const parent = refs.goalsWindow.getBrowserWindow();
+    const result = parent
+      ? await dialog.showSaveDialog(parent, options)
+      : await dialog.showSaveDialog(options);
+    if (result.canceled || !result.filePath) {
+      return { ok: true, canceled: true };
+    }
+    await fs.promises.writeFile(result.filePath, markdown, 'utf8');
+    logger.info(`目标清单已导出：${result.filePath}`);
+    return { ok: true, path: result.filePath };
+  } catch (err) {
+    logger.warn(`导出目标清单失败：${(err as Error).message}`);
+    return { ok: false, message: `导出失败：${(err as Error).message}` };
+  }
 }
 
 /* ============================================================================

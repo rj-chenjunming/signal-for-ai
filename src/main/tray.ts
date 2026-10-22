@@ -30,6 +30,8 @@ export interface TrayCallbacks {
   onOpenPanel: () => void;
   /** 暂停/恢复监控。 */
   onTogglePause: (paused: boolean) => void;
+  /** 打开目标清单窗口（SPEC-024）。 */
+  onOpenGoals: () => void;
   /** 切换通知开关。 */
   onToggleNotify: (field: 'popup' | 'sound', value: boolean) => void;
   /**
@@ -159,6 +161,7 @@ export class TrayController {
         ? ([{ label: '跳转到任务现场', submenu: taskItems }, { type: 'separator' }] as const)
         : []),
       { label: '打开面板', click: () => this.callbacks.onOpenPanel() },
+      { label: '目标清单…', click: () => this.callbacks.onOpenGoals() },
       {
         label: snapshot.paused ? '恢复监控' : '暂停监控（30 分钟）',
         click: () => this.callbacks.onTogglePause(!snapshot.paused),

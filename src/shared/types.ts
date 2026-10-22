@@ -516,6 +516,13 @@ export interface Snapshot {
   /** 每次变更自增，渲染层用于去重。 */
   version: number;
   /**
+   * 目标摘要（SPEC-025）：悬浮灯据此渲染「目标」行。
+   *
+   * 为 undefined 表示当前没有进行中的目标（或目标功能未接入），
+   * 此时浮窗不显示目标行，行为与本规格之前一致。
+   */
+  goalsSummary?: GoalsSummary;
+  /**
    * 灯带模式（设计决策 D6）：**可显示**行数 ≥ 2 时为 true。
    *
    * 单行时退回经典的单灯形态（干扰最小）；多行时显示
@@ -702,6 +709,84 @@ export interface FocusResult {
   /** 实际生效的降级级别：L1/L2/L3/L4/L5-none。 */
   level: string;
   detail: string;
+}
+
+/* ============================================================================
+ * 目标清单（SPEC-024）
+ * ==========================================================================*/
+
+/** 目标状态：进行中 / 已完成。只有两态，不引入暂停等运行态。 */
+export type GoalStatus = 'active' | 'done';
+
+/**
+ * 时间线条目类型。
+ *
+ * - `progress` / `issue`：用户手动追加
+ * - `done`：标记完成时由主进程自动追加（渲染层不能手动创建）
+ */
+export type GoalEntryKind = 'progress' | 'issue' | 'done';
+
+/** 目标时间线中的一条记录（追加为主，可删除）。 */
+export interface GoalEntry {
+  id: string;
+  /** epoch ms。 */
+  at: number;
+  kind: GoalEntryKind;
+  /** 1..500 字符，已 trim；渲染层用 textContent 输出。 */
+  text: string;
+}
+
+/** 一条目标（长期目标 / 备忘录条目）。 */
+export interface Goal {
+  id: string;
+  /** 1..120 字符，已 trim。 */
+  title: string;
+  /** 0..100 整数，由用户手动调整。 */
+  progress: number;
+  status: GoalStatus;
+  createdAt: number;
+  updatedAt: number;
+  /** 仅在 status === 'done' 时存在。 */
+  completedAt?: number;
+  /** 时间线，**最新在前**；渲染与导出都依赖这个顺序约定。 */
+  entries: GoalEntry[];
+}
+
+/** 目标窗口渲染所需的完整视图（主进程唯一数据源）。 */
+export interface GoalsView {
+  goals: Goal[];
+  /** 数据恢复/保存失败时的可关闭提示；无异常时缺省。 */
+  warning?: string;
+}
+
+/**
+ * 悬浮灯上的目标摘要（SPEC-025）。
+ *
+ * 只暴露渲染一行所需的聚合值，不把目标列表塞进快照：
+ * 浮窗只需知道「有几个进行中、平均进度多少」。
+ */
+export interface GoalsSummary {
+  /** 进行中的目标数（0 时浮窗不显示目标行）。 */
+  active: number;
+  /** 已完成的目标数（目前仅用于无障碍文案/调试）。 */
+  done: number;
+  /** 进行中目标的平均进度，0–100 整数；无进行中目标时为 0。 */
+  progress: number;
+}
+
+/** 导出结果：取消与失败必须可区分，避免渲染层把取消当错误。 */
+export interface GoalExportResult {
+  ok: boolean;
+  canceled?: boolean;
+  /** 成功写入的绝对路径。 */
+  path?: string;
+  message?: string;
+}
+
+/** 磁盘上的目标数据文件（版本化，便于将来迁移）。 */
+export interface GoalsFile {
+  version: 1;
+  goals: Goal[];
 }
 
 /** 配置热重载结果。 */

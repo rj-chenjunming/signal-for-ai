@@ -133,10 +133,13 @@ export function resolveCanvasSize(
   maxHeight: number,
   dock: LampDock = 'none',
   maxWidth: number = Number.POSITIVE_INFINITY,
+  forceStrip: boolean = false,
 ): { width: number; height: number } {
   const base = Math.max(16, Math.round(lampSize));
 
-  if (taskCount < 2) {
+  // forceStrip：有「目标」行时，即使只有 0/1 个任务也要灯带；
+  // 0 行没有可绘制内容，仍退回单灯（避免开一个空灯带）。
+  if (taskCount < 1 || (taskCount < 2 && !forceStrip)) {
     const square = base + SINGLE_LAMP_EXTRA;
     return { width: square, height: square };
   }

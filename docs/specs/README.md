@@ -5,6 +5,8 @@
 | Spec ID | 文档 | 类型 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
 | BASELINE-000 | [当前基线](000-baseline.md) | 接管现状 | observed | 从当前提交核对，不补造历史 TDD |
+| SPEC-025 | [悬浮灯「目标」行与新目标图标](025-overlay-goals-row.md) | feature（显示集成） | done | 用户 2026-10-22 12:31 真机确认「没问题」；Red 3失败 → Green 56；全量 909、check:ui 31、check:goals PASS |
+| SPEC-024 | [目标清单（独立窗口/进度/时间线/导出）](024-goals.md) | feature | done | 用户 2026-10-22 12:21 重启真机确认通过；全量 897、smoke、check:ui、check:goals 通过 |
 | SPEC-023 | [dsh 点击后窗口无法关闭（回归）](023-dsh-close-after-focus.md) | bugfix（回归） | done | dsh 一律单实例恢复、不再 Win32 最小化；Red 2失败/Green 114、全量 863；真机 1.786s，用户确认 X 正常 |
 | SPEC-022 | [桌面切换延迟（点击任务行到前台确认）](022-focus-latency.md) | bugfix（性能/交互时延） | done | 缓存优先 + 原生脚本内前台确认；真机 WorkBuddy 2.18s、dsh 1.90s（原 5.5–14s）；Red 7失败/Green 104、全量 862 项 |
 | SPEC-021 | [dsh 长回合活跃信号](021-dsh-long-turn-liveness.md) | feature（状态判定） | done | asOfSeq/tokenUsage/contextPressure 指纹延长 running；Red 2失败/Green 98、全量 858；真机静默 645 秒 dsh 行仍蓝；卡死侧由测试覆盖 |
@@ -34,7 +36,7 @@
 ## 下一轮候选（尚未安排实现）
 
 1. ~~dsh 端口自动跟随~~：已由 SPEC-005 落地（`authority: auto`）；可优化点见该规格"已知限制"（发现耗时 15~20 秒）。
-2. **简单 todo 功能**：优先级低于 AI 指示灯，待上面两项真机验收后另建规格。
-3. lockfile 与 CI 仍为后续候选。
+2. ~~简单 todo 功能~~：已由 [SPEC-024](024-goals.md) 落地为「目标清单」；悬浮灯展示由 [SPEC-025](025-overlay-goals-row.md) 落地，两者均已真机确认通过。
+3. lockfile 与 CI 仍为后续候选；JSON 导入/导出与窗口位置记忆未实现（见 SPEC-024 非目标）。
 
 后续功能需求沿用现有监控和窗口能力，不自动执行旧 `05-NEXT-PROMPT` 中曾提议的 `type: http`。

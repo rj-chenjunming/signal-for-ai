@@ -171,6 +171,14 @@ const stripRowCache = new Map<
   { row: HTMLButtonElement; dot: HTMLDivElement; port: HTMLSpanElement; icon: HTMLSpanElement }
 >();
 
+/** SPEC-025：「目标」行（不参与任务状态机，单独缓存）。 */
+let goalRowCache: {
+  row: HTMLButtonElement;
+  icon: HTMLSpanElement;
+  ring: HTMLDivElement;
+  label: HTMLSpanElement;
+} | null = null;
+
 /**
  * 按快照切换单灯 / 灯带形态，并更新灯带内容。
  *
@@ -192,6 +200,10 @@ function renderStripMode(snapshot: AiSnapshot): void {
     // 退回单灯时清空缓存，避免下次进灯带时残留旧行
     stripRowCache.clear();
     stripRows.replaceChildren();
+    if (goalRowCache) {
+      goalRowCache.row.remove();
+      goalRowCache = null;
+    }
     return;
   }
 
@@ -218,22 +230,17 @@ function renderStripMode(snapshot: AiSnapshot): void {
   // 本文件是 classic script（零 import），import 共享模块会生成 `export {}`
   // 让页面变成模块脚本而白屏；而规则若在这里再写一份，两处就会漂移。
   const visibleTasks = snapshot.displayTasks ?? snapshot.tasks;
+  const hasGoalRow = snapshot.goalsSummary !== undefined && snapshot.goalsSummary.active > 0;
 
-  if (visibleTasks.length === 0) {
-    // 此刻没有任何东西活着 —— 主进程会把 stripMode 置 false 缩成单灯。
+  if (visibleTasks.length === 0 && !hasGoalRow) {
+    // 此刻没有任何东西活着，也没有目标行 —— 主进程会把 stripMode 置 false 缩成单灯。
     // 这里只需清空，避免留下上一轮的残留行。
     stripRows.replaceChildren();
     stripRowCache.clear();
-    return;
-  }
-
-  if (snapshot.tasks.length === 0) {
-    stripRows.replaceChildren();
-    const empty = document.createElement('div');
-    empty.className = 'strip-empty';
-    empty.textContent = '未配置监控端口';
-    stripRows.appendChild(empty);
-    stripRowCache.clear();
+    if (goalRowCache) {
+      goalRowCache.row.remove();
+      goalRowCache = null;
+    }
     return;
   }
 
@@ -328,6 +335,59 @@ function renderStripMode(snapshot: AiSnapshot): void {
       stripRowCache.delete(taskId);
     }
   }
+
+  // SPEC-025：目标行固定在任务行之后；点击打开目标清单窗口。
+  renderGoalRow(snapshot);
+}
+
+/**
+ * 渲染/更新浮窗底部的「目标」行（SPEC-025）。
+ *
+ * 行内容：目标图标 + 平均进度环 + 「目标 N」。
+ * 没有进行中目标时整行移除（已完成目标不常驻浮窗）。
+ */
+function renderGoalRow(snapshot: AiSnapshot): void {
+  const summary = snapshot.goalsSummary;
+  if (!summary || summary.active <= 0) {
+    if (goalRowCache) {
+      goalRowCache.row.remove();
+      goalRowCache = null;
+    }
+    return;
+  }
+
+  if (!goalRowCache) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'strip-row strip-goal-row';
+
+    const icon = document.createElement('span');
+    icon.className = 'tool-icon';
+
+    const ring = document.createElement('div');
+    ring.className = 'strip-goal-ring';
+
+    const label = document.createElement('span');
+    label.className = 'strip-port';
+
+    row.appendChild(icon);
+    row.appendChild(ring);
+    row.appendChild(label);
+    row.addEventListener('click', () => {
+      void api?.openGoals();
+    });
+    goalRowCache = { row, icon, ring, label };
+  }
+
+  const progress = Math.max(0, Math.min(100, summary.progress));
+  const { row, icon, ring, label } = goalRowCache;
+  icon.innerHTML = window.aiIndicatorUi?.icon('goals') ?? '';
+  ring.style.setProperty('--goal-progress', String(progress));
+  row.dataset['goalProgress'] = String(progress);
+  label.textContent = `目标 ${summary.active}`;
+  row.setAttribute('aria-label', `目标：${summary.active} 个进行中，平均进度 ${progress}%`);
+  // 保持在任务行之后（appendChild 会移动已有节点，不会重建）。
+  stripRows.appendChild(row);
 }
 
 /* ============================================================================

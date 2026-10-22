@@ -14,6 +14,8 @@ import { ipcMain, type BrowserWindow, type WebContents } from 'electron';
 import { IPC, IPC_PUSH, type ConfigReloadOutcome, type InvokeMap } from '../shared/ipc-contract';
 import type {
   FocusResult,
+  GoalExportResult,
+  GoalsView,
   LampLayout,
   NotifyActionId,
   ProbeTerminalResponse,
@@ -47,6 +49,19 @@ export interface IpcHandlers {
   getLayout?: () => LampLayout;
   /** 配置热重载完成（主进程 -> 渲染层可据此拉新快照）。 */
   onConfigReloaded?: (outcome: ConfigReloadOutcome) => void;
+
+  /* ---- SPEC-024：目标清单 ---- */
+  goalsGet?: () => GoalsView;
+  goalsAdd?: (request: unknown) => TaskActionResponse;
+  goalsRemove?: (request: unknown) => TaskActionResponse;
+  goalsUpdateTitle?: (request: unknown) => TaskActionResponse;
+  goalsSetProgress?: (request: unknown) => TaskActionResponse;
+  goalsComplete?: (request: unknown) => TaskActionResponse;
+  goalsAddEntry?: (request: unknown) => TaskActionResponse;
+  goalsDeleteEntry?: (request: unknown) => TaskActionResponse;
+  goalsExport?: () => Promise<GoalExportResult>;
+  goalsHide?: () => void;
+  openGoals?: () => TaskActionResponse;
 }
 
 /** 注册全部 invoke 通道。 */
@@ -102,6 +117,34 @@ export function registerIpcHandlers(handlers: IpcHandlers, logger: Logger): void
 
   // 布局：没注入 handler 时回一个"不停靠"的合法值，渲染层不必判空
   safe(IPC.GET_LAYOUT, () => handlers.getLayout?.() ?? { dock: 'none' });
+
+  /* ---- SPEC-024：目标清单（未注入时返回可解释的降级值） ---- */
+  safe(IPC.GOALS_GET, () => handlers.goalsGet?.() ?? { goals: [] });
+  safe(IPC.GOALS_ADD, (request) => handlers.goalsAdd?.(request) ?? goalsUnavailable());
+  safe(IPC.GOALS_DELETE, (request) => handlers.goalsRemove?.(request) ?? goalsUnavailable());
+  safe(
+    IPC.GOALS_UPDATE_TITLE,
+    (request) => handlers.goalsUpdateTitle?.(request) ?? goalsUnavailable(),
+  );
+  safe(
+    IPC.GOALS_SET_PROGRESS,
+    (request) => handlers.goalsSetProgress?.(request) ?? goalsUnavailable(),
+  );
+  safe(IPC.GOALS_COMPLETE, (request) => handlers.goalsComplete?.(request) ?? goalsUnavailable());
+  safe(IPC.GOALS_ADD_ENTRY, (request) => handlers.goalsAddEntry?.(request) ?? goalsUnavailable());
+  safe(
+    IPC.GOALS_DELETE_ENTRY,
+    (request) => handlers.goalsDeleteEntry?.(request) ?? goalsUnavailable(),
+  );
+  safe(IPC.GOALS_EXPORT, () => handlers.goalsExport?.() ?? {
+    ok: false,
+    message: '目标导出暂不可用',
+  });
+  safe(IPC.GOALS_HIDE, () => {
+    handlers.goalsHide?.();
+    return undefined as never;
+  });
+  safe(IPC.OPEN_GOALS, () => handlers.openGoals?.() ?? goalsUnavailable());
 }
 
 /** 向指定窗口推送布局（M→R）。 */
@@ -117,6 +160,16 @@ export function pushSnapshot(win: BrowserWindow | null, snapshot: Snapshot): voi
 /** 向指定窗口推送音效播放指令（M→R）。 */
 export function pushPlaySound(win: BrowserWindow | null, status: TaskStatus): void {
   sendTo(win, IPC_PUSH.PLAY_SOUND, { status }, 'notify:play');
+}
+
+/** 向目标窗口推送目标数据（M→R，SPEC-024）。 */
+export function pushGoals(win: BrowserWindow | null, view: GoalsView): void {
+  sendTo(win, IPC_PUSH.GOALS_CHANGED, view, 'goals:changed');
+}
+
+/** 目标通道未注入时的统一降级响应。 */
+function goalsUnavailable(): TaskActionResponse {
+  return { ok: false, message: '目标功能暂不可用' };
 }
 
 /** 向所有窗口广播一条 toast 提示。 */
@@ -185,6 +238,24 @@ function fallbackResponse(channel: string): unknown {
   }
   if (channel === IPC.GET_LAYOUT) {
     return { dock: 'none' } satisfies LampLayout;
+  }
+  if (channel === IPC.GOALS_GET) {
+    return { goals: [] } satisfies GoalsView;
+  }
+  if (channel === IPC.GOALS_EXPORT) {
+    return { ok: false, message: '主进程处理失败' } satisfies GoalExportResult;
+  }
+  if (
+    channel === IPC.GOALS_ADD ||
+    channel === IPC.GOALS_DELETE ||
+    channel === IPC.GOALS_UPDATE_TITLE ||
+    channel === IPC.GOALS_SET_PROGRESS ||
+    channel === IPC.GOALS_COMPLETE ||
+    channel === IPC.GOALS_ADD_ENTRY ||
+    channel === IPC.GOALS_DELETE_ENTRY ||
+    channel === IPC.OPEN_GOALS
+  ) {
+    return { ok: false, message: '主进程处理失败' } satisfies TaskActionResponse;
   }
   if (channel === IPC.TAKE_PANEL_MESSAGE) return {};
   return { ok: false };

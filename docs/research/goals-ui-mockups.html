@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>目标功能 · 两种落点对照</title>
+<style>
+  :root {
+    --page: #0b0f16;
+    --panel: #1F2430;
+    --panel-2: #262d3b;
+    --line: #333c4d;
+    --text: #e6e9ef;
+    --muted: #9aa4b2;
+    --faint: #6f7a8b;
+    --blue: #4c9aff;
+    --green: #35c46a;
+    --red: #ef5b5b;
+    --yellow: #e8b13f;
+    --purple: #a78bfa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 36px 28px 64px;
+    background: radial-gradient(1200px 600px at 50% -10%, #172033 0%, var(--page) 60%);
+    color: var(--text);
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: .2px; }
+  .lede { color: var(--muted); margin: 0 0 30px; font-size: 14px; line-height: 1.6; }
+  .lede b { color: var(--text); font-weight: 600; }
+  .layout { display: flex; gap: 34px; justify-content: center; align-items: flex-start; flex-wrap: wrap; }
+  .choice {
+    width: 610px; cursor: pointer; border-radius: 18px; padding: 18px;
+    background: rgba(255,255,255,.025); border: 1px solid transparent;
+    transition: border-color .15s ease, background .15s ease, transform .15s ease;
+  }
+  .choice:hover { border-color: #3b465c; background: rgba(255,255,255,.04); }
+  .choice.selected { border-color: var(--blue); background: rgba(76,154,255,.08); }
+  .choice-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .choice-head .letter {
+    width: 26px; height: 26px; border-radius: 8px; display: inline-flex;
+    align-items: center; justify-content: center; font-weight: 700; font-size: 14px;
+    background: var(--blue); color: #07101f; flex: none; transform: translateY(3px);
+  }
+  .choice-head h2 { font-size: 18px; margin: 0; }
+  .choice-sub { color: var(--muted); font-size: 13px; margin: 8px 0 16px 36px; line-height: 1.6; }
+  .window {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,.45), 0 2px 0 rgba(255,255,255,.03) inset;
+    margin: 0 auto;
+  }
+  .win-bar {
+    height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 12px;
+    background: #171c26; border-bottom: 1px solid var(--line); color: var(--faint); font-size: 11px;
+  }
+  .dots { display: flex; gap: 5px; }
+  .dots i { width: 9px; height: 9px; border-radius: 50%; background: #394252; display: block; }
+  .win-bar .name { margin-left: 4px; letter-spacing: .4px; }
+  .win-bar .spacer { flex: 1; }
+  .win-bar .pin { color: var(--faint); }
+
+  /* ---------- window A: 独立目标窗口 ---------- */
+  .win-a { width: 560px; }
+  .a-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 12px; }
+  .a-title { font-size: 16px; font-weight: 650; letter-spacing: .3px; }
+  .a-title span { color: var(--faint); font-size: 11px; font-weight: 400; margin-left: 8px; letter-spacing: 1px; }
+  .a-actions { display: flex; gap: 6px; }
+  .mini-btn { border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: 11px; padding: 4px 9px; border-radius: 7px; }
+  .add-row { display: flex; gap: 8px; padding: 0 18px 14px; }
+  .add-input {
+    flex: 1; background: #121722; border: 1px solid var(--line); border-radius: 9px;
+    color: var(--faint); font-size: 13px; padding: 9px 12px;
+  }
+  .add-btn { background: var(--blue); color: #07101f; border: 0; border-radius: 9px; padding: 0 14px; font-size: 13px; font-weight: 650; }
+  .list { padding: 0 12px 8px; }
+  .goal {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px;
+    padding: 12px 13px; margin-bottom: 10px;
+  }
+  .goal.active { border-color: #3d5a86; }
+  .goal-top { display: flex; align-items: center; gap: 9px; }
+  .goal-title { font-size: 14px; font-weight: 600; flex: 1; }
+  .goal-pct { font-size: 12px; color: var(--blue); font-variant-numeric: tabular-nums; }
+  .goal-del { color: var(--faint); font-size: 12px; border: 0; background: transparent; padding: 2px 4px; }
+  .bar { height: 5px; background: #161b26; border-radius: 99px; margin: 10px 0 0; overflow: hidden; }
+  .bar > i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, #4c9aff, #7cc4ff); }
+  .bar.warm > i { background: linear-gradient(90deg, #e8b13f, #f5d06f); }
+  .goal-meta { display: flex; align-items: center; gap: 10px; margin-top: 9px; color: var(--faint); font-size: 11px; }
+  .tag { border-radius: 5px; padding: 1px 6px; font-size: 10px; }
+  .tag.prog { background: rgba(76,154,255,.14); color: #8fc1ff; }
+  .tag.issue { background: rgba(239,91,91,.14); color: #ff9a9a; }
+  .tag.done { background: rgba(53,196,106,.14); color: #86e3a9; }
+  .timeline { margin: 12px 0 0; padding: 12px 0 2px 18px; border-top: 1px dashed var(--line); position: relative; }
+  .entry { position: relative; padding: 0 0 12px 14px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .entry::before {
+    content: ""; position: absolute; left: -1px; top: 4px; width: 7px; height: 7px;
+    border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 3px rgba(76,154,255,.12);
+  }
+  .entry.issue::before { background: var(--red); box-shadow: 0 0 0 3px rgba(239,91,91,.12); }
+  .entry.done::before { background: var(--green); box-shadow: 0 0 0 3px rgba(53,196,106,.12); }
+  .entry time { color: var(--faint); font-size: 10px; margin-right: 7px; font-variant-numeric: tabular-nums; }
+  .entry .text { color: var(--text); }
+  .entry .sub { display: block; color: var(--faint); font-size: 10px; margin-top: 2px; }
+  .entry-add { display: flex; gap: 6px; padding: 2px 0 10px 14px; }
+  .entry-add input { flex: 1; background: #121722; border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; font-size: 11px; color: var(--faint); }
+  .entry-add .chip { border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 10px; border-radius: 6px; padding: 0 7px; }
+  .done-head { display: flex; align-items: center; gap: 7px; color: var(--faint); font-size: 11px; padding: 4px 6px 10px; }
+  .a-foot { display: flex; justify-content: space-between; padding: 10px 18px 14px; border-top: 1px solid var(--line); color: var(--faint); font-size: 11px; margin-top: 4px; }
+
+  /* ---------- window B: 任务面板内 tab ---------- */
+  .win-b { width: 420px; }
+  .b-head { padding: 14px 16px 10px; }
+  .b-eyebrow { font-size: 9px; letter-spacing: 2px; color: var(--faint); }
+  .b-title { font-size: 16px; font-weight: 650; margin: 3px 0 0; }
+  .b-tabs { display: flex; gap: 4px; padding: 4px 12px 0; border-bottom: 1px solid var(--line); }
+  .b-tab { font-size: 12px; color: var(--faint); padding: 7px 10px 9px; border-bottom: 2px solid transparent; }
+  .b-tab.on { color: var(--text); border-bottom-color: var(--blue); }
+  .b-tab .n { color: var(--faint); font-size: 10px; margin-left: 4px; }
+  .b-body { padding: 10px 12px 8px; }
+  .b-add { display: flex; gap: 6px; margin-bottom: 9px; }
+  .b-add input { flex: 1; background: #121722; border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; font-size: 11px; color: var(--faint); }
+  .b-goal { background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; margin-bottom: 8px; }
+  .b-goal .row { display: flex; align-items: center; gap: 7px; }
+  .b-goal .t { font-size: 12px; font-weight: 600; flex: 1; }
+  .b-goal .p { font-size: 10px; color: var(--blue); }
+  .b-goal .bar { margin-top: 7px; height: 4px; }
+  .b-timeline { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+  .b-entry { display: flex; gap: 6px; font-size: 10.5px; color: var(--muted); padding: 3px 0; }
+  .b-entry .d { color: var(--faint); flex: none; font-variant-numeric: tabular-nums; }
+  .b-entry .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--blue); margin-top: 5px; flex: none; }
+  .b-entry.issue .dot { background: var(--red); }
+  .b-entry.done .dot { background: var(--green); }
+  .b-foot { padding: 9px 14px 12px; border-top: 1px solid var(--line); color: var(--faint); font-size: 10px; display: flex; justify-content: space-between; }
+  .b-task-hint {
+    margin: 8px 12px 12px; padding: 9px 10px; border-radius: 8px; border: 1px dashed #44506a;
+    color: var(--faint); font-size: 10.5px; line-height: 1.5;
+  }
+
+  /* ---------- tradeoffs ---------- */
+  .tradeoffs { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 16px; }
+  .tr { display: flex; gap: 9px; font-size: 12px; color: var(--muted); line-height: 1.55; }
+  .tr .k { flex: none; width: 52px; color: var(--faint); }
+  .tr .yes { color: #9fe3b8; }
+  .tr .no { color: #efb0b0; }
+  .verdict {
+    margin: 34px auto 0; max-width: 1260px; border: 1px solid var(--line); border-radius: 14px;
+    background: rgba(255,255,255,.025); padding: 16px 20px; color: var(--muted); font-size: 13px; line-height: 1.65;
+  }
+  .verdict b { color: var(--text); }
+  .picked { margin-top: 10px; color: var(--blue); font-size: 13px; }
+  code { background: #121722; border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>「目标」功能应该住在哪里？</h1>
+  <p class="lede">
+    同一个功能、同一套数据，画了两种落点。<b>点一下选中的方案</b>，然后回终端告诉我 A 还是 B（或哪里不对）。
+    内容示例：长期目标「把 AI 任务指示灯做出来」+ 进度 + 时间线（进展 / 问题 / 完成）。
+  </p>
+
+  <div class="layout">
+    <!-- ============ A ============ -->
+    <div class="choice" data-choice="A" onclick="selectChoice(this)">
+      <div class="choice-head"><span class="letter">A</span><h2>独立「目标」窗口</h2></div>
+      <p class="choice-sub">像备忘录一样单独开一扇窗，可以从托盘菜单和任务面板进入；可以一直开着写，不会因为点别处就消失。</p>
+
+      <div class="window win-a">
+        <div class="win-bar">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <span class="name">目标 — AI 任务指示灯</span>
+          <span class="spacer"></span>
+          <span class="pin">置顶 · 560×640</span>
+        </div>
+        <div class="a-head">
+          <div class="a-title">目标 <span>GOALS</span></div>
+          <div class="a-actions"><span class="mini-btn">＋ 新建</span><span class="mini-btn">⋯</span></div>
+        </div>
+        <div class="add-row">
+          <div class="add-input">写下这周想推进的事，回车创建…</div>
+          <div class="add-btn">＋</div>
+        </div>
+        <div class="list">
+          <div class="goal active">
+            <div class="goal-top">
+              <span class="goal-title">把 AI 任务指示灯做出来</span>
+              <span class="goal-pct">40%</span>
+              <button class="goal-del">✕</button>
+            </div>
+            <div class="bar"><i style="width:40%"></i></div>
+            <div class="goal-meta"><span class="tag prog">长期</span><span>3 条记录</span><span>10/22 更新</span></div>
+            <div class="timeline">
+              <div class="entry"><time>10/22</time><span class="tag prog">进展</span> <span class="text">todo 功能调研完成，定了 6 个参考项目</span></div>
+              <div class="entry issue"><time>10/20</time><span class="tag issue">问题</span> <span class="text">Windows 真机验收还欠一次，灯带停靠没实测</span></div>
+              <div class="entry done"><time>10/20</time><span class="tag done">完成</span> <span class="text">SPEC-023 dsh 关闭窗口回归修复</span></div>
+              <div class="entry-add"><input placeholder="追加一条进展…" /><button class="chip">进展</button><button class="chip">问题</button></div>
+            </div>
+          </div>
+          <div class="goal">
+            <div class="goal-top">
+              <span class="goal-title">每周跑步 3 次</span>
+              <span class="goal-pct">66%</span>
+              <button class="goal-del">✕</button>
+            </div>
+            <div class="bar warm"><i style="width:66%"></i></div>
+            <div class="goal-meta"><span class="tag prog">本周</span><span>2 条记录</span><span>10/21 更新</span></div>
+          </div>
+          <div class="done-head">▸ 已完成 1 个（点击展开）</div>
+        </div>
+        <div class="a-foot"><span>2 个进行中 · 1 个已完成</span><span>Enter 追加 · Esc 关闭</span></div>
+      </div>
+
+      <div class="tradeoffs">
+        <div class="tr"><span class="k">优点</span><span class="yes">空间大，时间线读起来不挤；窗口可一直开着，写记录不被打断；和「任务一览」职责分开，不会互相挤高度。</span></div>
+        <div class="tr"><span class="k">代价</span><span class="no">新增一个窗口类、位置/大小记忆、托盘与面板两个入口；工作量比 B 多一截。</span></div>
+        <div class="tr"><span class="k">适合</span><span>每天会打开写两笔、周五回看时间线的用法。</span></div>
+      </div>
+    </div>
+
+    <!-- ============ B ============ -->
+    <div class="choice" data-choice="B" onclick="selectChoice(this)">
+      <div class="choice-head"><span class="letter">B</span><h2>任务面板里加一个「目标」页</h2></div>
+      <p class="choice-sub">复用现在的 420×≤520 小面板，顶部加「任务 / 目标」切换；不新增窗口，改动最小。</p>
+
+      <div class="window win-b">
+        <div class="win-bar">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <span class="name">AI 任务指示灯</span>
+          <span class="spacer"></span>
+          <span class="pin">420×520</span>
+        </div>
+        <div class="b-head">
+          <div class="b-eyebrow">AI SIGNAL</div>
+          <div class="b-title">任务一览</div>
+        </div>
+        <div class="b-tabs">
+          <span class="b-tab">任务<span class="n">3</span></span>
+          <span class="b-tab on">目标<span class="n">2</span></span>
+        </div>
+        <div class="b-body">
+          <div class="b-add"><input placeholder="新增目标，回车创建…" /><span class="mini-btn">＋</span></div>
+          <div class="b-goal">
+            <div class="row"><span class="t">把 AI 任务指示灯做出来</span><span class="p">40%</span></div>
+            <div class="bar"><i style="width:40%"></i></div>
+            <div class="b-timeline">
+              <div class="b-entry"><span class="dot"></span><span class="d">10/22</span><span>todo 调研完成，定了 6 个参考项目</span></div>
+              <div class="b-entry issue"><span class="dot"></span><span class="d">10/20</span><span>问题：Windows 真机验收还欠一次</span></div>
+              <div class="b-entry done"><span class="dot"></span><span class="d">10/20</span><span>完成：SPEC-023 关闭窗口回归修复</span></div>
+            </div>
+          </div>
+          <div class="b-goal">
+            <div class="row"><span class="t">每周跑步 3 次</span><span class="p">66%</span></div>
+            <div class="bar warm"><i style="width:66%"></i></div>
+            <div class="b-timeline">
+              <div class="b-entry"><span class="dot"></span><span class="d">10/21</span><span>跑完第 2 次，配速 6'10"</span></div>
+            </div>
+          </div>
+          <div class="done-head">▸ 已完成 1 个</div>
+        </div>
+        <div class="b-task-hint">
+          任务页的高度会被目标内容挤占，且面板失焦会自动收起——写长记录时容易刚写一半窗口没了。
+        </div>
+        <div class="b-foot"><span>2 个进行中 · 1 个已完成</span><span>Esc 收起</span></div>
+      </div>
+
+      <div class="tradeoffs">
+        <div class="tr"><span class="k">优点</span><span class="yes">改动最小，复用现有窗口、IPC、样式和测试；入口就是现成的托盘 / 指示灯。</span></div>
+        <div class="tr"><span class="k">代价</span><span class="no">420px 宽 + 最多 520px 高，时间线和进度条都挤；失焦自动收起，长时间记东西难受；两套内容抢同一块高度。</span></div>
+        <div class="tr"><span class="k">适合</span><span>只想偶尔记一笔、不需要回看长历史。</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="verdict">
+    <b>我的建议：A。</b>你描述的是「每周 KR + 长期目标 + 时间线 + 问题记录」，这是需要坐下来写一会儿的备忘录，不是扫一眼的状态面板。
+    B 的 420×520 且失焦即收起，正好是调研里 TodoPop/DeskTodo 都避开的用法。若想先小步验证，也可以先做 B 再升级，但那样交互和布局要返工一次。
+    <div class="picked" id="picked"></div>
+  </div>
+
+  <p class="lede" style="margin-top:22px">参考图里只是布局示意，颜色和间距沿用现有深色主题；最终以 specTDD 规格和真机截图为准。</p>
+
+<script>
+  function selectChoice(el) {
+    document.querySelectorAll('.choice').forEach(function (c) { c.classList.remove('selected'); });
+    el.classList.add('selected');
+    var choice = el.getAttribute('data-choice');
+    document.getElementById('picked').textContent =
+      '已选 ' + choice + ' —— 回终端说一声，或直接说哪里要改。';
+  }
+</script>
+</body>
+</html>

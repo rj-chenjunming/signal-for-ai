@@ -260,6 +260,17 @@ describe('resolveCanvasSize —— 单灯与灯带两种形态', () => {
     expect(width).toBeLessThan(180);
     expect(width).toBeGreaterThanOrEqual(100);
   });
+
+  it('forceStrip：目标行让 0/1 个任务也采用灯带尺寸', () => {
+    expect(resolveCanvasSize(28, 1, 900, 'none', 1200, true)).toEqual({
+      width: stripCanvasWidth(),
+      height: stripCanvasHeight(1),
+    });
+    // 没有目标行时维持原行为
+    expect(resolveCanvasSize(28, 1, 900, 'none', 1200, false)).toEqual({ width: 52, height: 52 });
+    // 0 行没有可绘制内容，仍退回单灯
+    expect(resolveCanvasSize(28, 0, 900, 'none', 1200, true)).toEqual({ width: 52, height: 52 });
+  });
 });
 
 /* ============================================================================

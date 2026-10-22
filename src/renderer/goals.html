@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;"
+    />
+    <title>AI 任务指示灯 — 目标清单</title>
+    <link rel="stylesheet" href="./shared.css" />
+    <link rel="stylesheet" href="./goals.css" />
+  </head>
+  <body data-indicator-role="goals" class="goals-body">
+    <header class="goals-header">
+      <div class="goals-heading">
+        <div class="goals-eyebrow">GOALS</div>
+        <div class="goals-title"><span class="goals-title-icon" id="goals-title-icon"></span>目标清单</div>
+        <div class="goals-sub">把想推进的事写下来，进度与记录都留在这里</div>
+      </div>
+      <div class="goals-actions">
+        <button class="goals-btn" id="btn-export" title="把全部目标与记录导出为 Markdown">导出</button>
+        <button class="icon-btn" id="btn-close" title="隐藏窗口" aria-label="隐藏目标窗口">✕</button>
+      </div>
+    </header>
+
+    <div class="goals-warning" id="goals-warning" hidden role="status">
+      <span id="goals-warning-text"></span>
+      <button class="warning-dismiss" id="btn-dismiss-warning" aria-label="关闭提示">✕</button>
+    </div>
+
+    <div class="goals-add">
+      <input
+        id="goal-input"
+        class="goal-input"
+        type="text"
+        maxlength="120"
+        placeholder="新增目标，回车创建…"
+        autocomplete="off"
+        spellcheck="false"
+        aria-label="新增目标"
+      />
+      <button class="goals-btn primary" id="btn-add-goal">＋ 添加</button>
+    </div>
+
+    <main class="goals-list" id="goals-list" aria-label="目标列表"></main>
+
+    <div class="goals-empty" id="goals-empty" hidden>
+      <p class="empty-title">还没有目标</p>
+      <p class="empty-hint">先写一个想推进的方向，比如「把这个项目做出来」。</p>
+      <p class="empty-hint">之后可以拉进度、记进展与问题，最后一键导出。</p>
+    </div>
+
+    <footer class="goals-footer">
+      <span id="goals-count">0 个进行中 · 0 个已完成</span>
+      <span class="goals-key">Enter 记录 · Esc 隐藏</span>
+    </footer>
+
+    <div class="goals-toast" id="goals-toast" role="status"></div>
+
+    <script src="./ui.js"></script>
+    <script src="./goals.js"></script>
+  </body>
+</html>

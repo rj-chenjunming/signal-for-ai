@@ -18,6 +18,12 @@
 
 import type {
   FocusResult,
+  Goal,
+  GoalEntry,
+  GoalEntryKind,
+  GoalExportResult,
+  GoalStatus,
+  GoalsView,
   LampDock,
   LampLayout,
   NotifyActionId,
@@ -70,4 +76,10 @@ declare global {
   type AiProbeTerminalResponse = ProbeTerminalResponse;
   type AiLampDock = LampDock;
   type AiLampLayout = LampLayout;
+  type AiGoal = Goal;
+  type AiGoalEntry = GoalEntry;
+  type AiGoalStatus = GoalStatus;
+  type AiGoalEntryKind = GoalEntryKind;
+  type AiGoalsView = GoalsView;
+  type AiGoalExportResult = GoalExportResult;
 }

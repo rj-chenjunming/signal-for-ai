@@ -37,6 +37,9 @@ const summaryCounts = {
 };
 const btnPause = document.getElementById('btn-pause') as HTMLButtonElement;
 const btnClose = document.getElementById('btn-close') as HTMLButtonElement;
+const btnGoals = document.getElementById('btn-goals') as HTMLButtonElement;
+// SPEC-025：目标入口使用与悬浮灯一致的目标图标（本地固定 SVG）。
+btnGoals.innerHTML = window.aiIndicatorUi?.icon('goals') ?? '◎';
 
 /** 状态视觉元数据 —— 色值一律走 CSS 变量，真实色由 shared/constants.ts 定义（架构 §8.1）。 */
 const STATUS_VISUAL: Record<AiTaskStatus, { colorVar: string; icon: string; label: string }> = {
@@ -312,6 +315,11 @@ function showToast(message: string): void {
 btnClose.addEventListener('click', () => {
   // 收起面板：toggle 会走主进程 hide()，不销毁窗口（避免下次重建的开销）
   void api?.togglePanel();
+});
+
+btnGoals.addEventListener('click', () => {
+  // SPEC-024：目标窗口是独立窗口；已打开时由主进程负责聚焦而不是重复创建。
+  void api?.openGoals();
 });
 
 btnPause.addEventListener('click', async () => {

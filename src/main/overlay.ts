@@ -158,7 +158,11 @@ export class OverlayWindow {
    */
   private stripTaskCount(): number {
     if (this.lastSnapshot !== null) {
-      return countVisibleTasks(this.lastSnapshot.tasks);
+      const visible = countVisibleTasks(this.lastSnapshot.tasks);
+      // SPEC-025：有进行中目标时，浮窗底部多一行「目标」，窗口尺寸必须一起算。
+      const goalsSummary = this.lastSnapshot.goalsSummary;
+      const goalRow = goalsSummary && goalsSummary.active > 0 ? 1 : 0;
+      return visible + goalRow;
     }
     return this.options.taskCount?.() ?? 0;
   }
@@ -186,7 +190,7 @@ export class OverlayWindow {
     } catch {
       // 无 display 信息（极早期调用/无头环境）时用保守上限
     }
-    return resolveCanvasSize(this.settings.size, this.stripTaskCount(), maxHeight, this.dock, maxWidth);
+    return resolveCanvasSize(this.settings.size, this.stripTaskCount(), maxHeight, this.dock, maxWidth, this.lastSnapshot?.stripMode === true);
   }
 
   /**
