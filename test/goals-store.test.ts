@@ -394,6 +394,101 @@ describe('GoalsStore 持久化与恢复', () => {
   });
 });
 
+describe('GoalsStore 拖拽排序（SPEC-026）', () => {
+  it('同组内可移动到另一个目标之前，顺序立即生效', () => {
+    const h = makeStore();
+    h.store.addGoal('A');
+    h.store.addGoal('B');
+    h.store.addGoal('C');
+    // 新增在顶部 => [C, B, A]
+    const byTitle = (title: string) =>
+      h.store.getView().goals.find((goal) => goal.title === title)!.id;
+
+    expect(h.store.moveGoal(byTitle('A'), byTitle('C')).ok).toBe(true);
+    expect(h.store.getView().goals.map((goal) => goal.title)).toEqual(['A', 'C', 'B']);
+  });
+
+  it('beforeId 为 null 时移动到同组末尾', () => {
+    const h = makeStore();
+    h.store.addGoal('A');
+    h.store.addGoal('B');
+    h.store.addGoal('C');
+    const byTitle = (title: string) =>
+      h.store.getView().goals.find((goal) => goal.title === title)!.id;
+
+    expect(h.store.moveGoal(byTitle('A'), null).ok).toBe(true);
+    expect(h.store.getView().goals.map((goal) => goal.title)).toEqual(['C', 'B', 'A']);
+  });
+
+  it('排序不改动 updatedAt、进度、状态与时间线', () => {
+    const h = makeStore();
+    h.store.addGoal('A');
+    h.store.addGoal('B');
+    const before = h.store.getView().goals.find((goal) => goal.title === 'A')!;
+    h.advance(5000);
+    const idA = before.id;
+    const idB = h.store.getView().goals.find((goal) => goal.title === 'B')!.id;
+
+    expect(h.store.moveGoal(idA, idB).ok).toBe(true);
+    const after = h.store.getView().goals.find((goal) => goal.title === 'A')!;
+    expect(after.updatedAt).toBe(before.updatedAt);
+    expect(after.progress).toBe(before.progress);
+    expect(after.status).toBe(before.status);
+    expect(after.entries).toEqual(before.entries);
+  });
+
+  it('拒绝跨状态组排序（不能靠拖拽改状态）', () => {
+    const h = makeStore();
+    h.store.addGoal('active');
+    h.store.addGoal('done');
+    const byTitle = (title: string) =>
+      h.store.getView().goals.find((goal) => goal.title === title)!.id;
+    h.store.complete(byTitle('done'));
+
+    const result = h.store.moveGoal(byTitle('active'), byTitle('done'));
+    expect(result.ok).toBe(false);
+    expect(h.store.getView().goals.find((goal) => goal.title === 'done')!.status).toBe('done');
+  });
+
+  it('拒绝不存在或自身的目标', () => {
+    const h = makeStore();
+    h.store.addGoal('A');
+    const id = h.store.getView().goals[0]!.id;
+    expect(h.store.moveGoal('missing', null).ok).toBe(false);
+    expect(h.store.moveGoal(id, 'missing').ok).toBe(false);
+    expect(h.store.moveGoal(id, id).ok).toBe(false);
+  });
+
+  it('排序后持久化，重新打开顺序不变', () => {
+    const h = makeStore({ debounceMs: 100000 });
+    h.store.addGoal('A');
+    h.store.addGoal('B');
+    h.store.addGoal('C');
+    const byTitle = (title: string) =>
+      h.store.getView().goals.find((goal) => goal.title === title)!.id;
+    h.store.moveGoal(byTitle('A'), byTitle('C'));
+    h.store.flush();
+    h.store.dispose();
+
+    const reopened = new GoalsStore({ filePath: h.filePath, debounceMs: 0 });
+    expect(reopened.getView().goals.map((goal) => goal.title)).toEqual(['A', 'C', 'B']);
+  });
+
+  it('排序后存储顺序规范化为「进行中在前、已完成在后」', () => {
+    const h = makeStore();
+    h.store.addGoal('A');
+    h.store.addGoal('B');
+    h.store.addGoal('C');
+    const byTitle = (title: string) =>
+      h.store.getView().goals.find((goal) => goal.title === title)!.id;
+    h.store.complete(byTitle('B'));
+    h.store.moveGoal(byTitle('A'), null);
+
+    const statuses = h.store.getView().goals.map((goal) => goal.status);
+    expect(statuses).toEqual(['active', 'active', 'done']);
+  });
+});
+
 describe('formatGoalTime', () => {
   it('输出本地时区的 YYYY-MM-DD HH:mm', () => {
     const at = new Date(2026, 9, 22, 9, 5).getTime();

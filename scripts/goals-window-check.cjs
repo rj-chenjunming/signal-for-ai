@@ -95,6 +95,7 @@ app.whenReady().then(async () => {
       goalsComplete: handlers.complete,
       goalsAddEntry: handlers.addEntry,
       goalsDeleteEntry: handlers.deleteEntry,
+      goalsMove: handlers.move,
       goalsExport: handlers.export,
       goalsHide: handlers.hide,
       openGoals: handlers.open,
@@ -135,6 +136,42 @@ app.whenReady().then(async () => {
     await waitFor('新增目标渲染', () => execute(win, `document.querySelectorAll('.goal').length === 1`));
     assert.ok(readFileSync(filePath, 'utf8').includes('把 AI 任务指示灯做出来'));
     const goalId = store.getView().goals[0].id;
+
+    // SPEC-026：新增第二条目标并通过真实拖拽调整顺序。
+    await execute(
+      win,
+      `(() => {
+        const input = document.querySelector('#goal-input');
+        input.value = '第二个目标';
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      })()`,
+    );
+    await waitFor('第二条目标落库', () => store.getView().goals.length === 2);
+    await waitFor('第二条目标渲染', () => execute(win, `document.querySelectorAll('.goal').length === 2`));
+    await execute(
+      win,
+      `(() => {
+        const cards = [...document.querySelectorAll('.goal')];
+        const a = cards[0], b = cards[1];
+        const handle = a.querySelector('.goal-drag');
+        const dataTransfer = new DataTransfer();
+        handle.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+        const rect = b.getBoundingClientRect();
+        b.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer, clientY: rect.top + rect.height - 2 }));
+        b.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer, clientY: rect.top + rect.height - 2 }));
+        handle.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer }));
+      })()`,
+    );
+    await waitFor('拖拽排序落库', () => store.getView().goals[0]?.id === goalId);
+    assert.deepEqual(
+      store.getView().goals.map((goal) => goal.title),
+      ['把 AI 任务指示灯做出来', '第二个目标'],
+    );
+    const afterDrag = JSON.parse(readFileSync(filePath, 'utf8'));
+    assert.deepEqual(
+      afterDrag.goals.map((goal) => goal.title),
+      ['把 AI 任务指示灯做出来', '第二个目标'],
+    );
 
     // 展开 → 进度 → 记录 → 完成。
     await execute(win, `document.querySelector('.goal-expand').click()`);
@@ -192,16 +229,19 @@ app.whenReady().then(async () => {
     store.flush();
     const reloaded = new GoalsStore({ filePath, debounceMs: 0, logger });
     const view = reloaded.getView();
-    assert.equal(view.goals.length, 1);
-    assert.equal(view.goals[0].id, goalId);
-    assert.equal(view.goals[0].progress, 100);
-    assert.equal(view.goals[0].status, 'done');
+    assert.equal(view.goals.length, 2);
+    const reloadedFirst = view.goals.find((goal) => goal.id === goalId);
+    assert.ok(reloadedFirst, 'first goal missing after reload');
+    assert.equal(reloadedFirst.progress, 100);
+    assert.equal(reloadedFirst.status, 'done');
     // 完成时自动追加一条 done 记录，所以这里应是 issue + done 两条。
-    assert.equal(view.goals[0].entries.length, 2);
+    assert.equal(reloadedFirst.entries.length, 2);
     assert.deepEqual(
-      view.goals[0].entries.map((entry) => entry.kind).sort(),
+      reloadedFirst.entries.map((entry) => entry.kind).sort(),
       ['done', 'issue'],
     );
+    // 拖拽后的顺序在文件中保留：第一条仍是先创建的目标。
+    assert.equal(view.goals[0].id, goalId);
 
     console.log('PASS: goals window real Electron/IPC integration (add → progress → entry → complete → export → hide → reopen → reload)');
     process.exitCode = 0;

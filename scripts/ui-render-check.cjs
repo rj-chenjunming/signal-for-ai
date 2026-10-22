@@ -14,8 +14,10 @@ mkdirSync(out, { recursive: true });
 const states = ['running', 'waiting', 'success', 'failed', 'starting', 'idle', 'unknown'];
 let fixture;
 let goalsOpened = 0;
+const goalMoves = [];
 ipcMain.on('ui-fixture', event => { event.returnValue = fixture; });
 ipcMain.on('ui-goal-open', () => { goalsOpened += 1; });
+ipcMain.on('ui-goal-move', (_event, payload) => { goalMoves.push(payload); });
 const results = [];
 function snapshot(count, paused = false, goalsSummary = null) {
   const store = new TaskStore(Array.from({ length: count }, (_, i) => ({ id: `fixture-${i}`, name: ['Codex', 'dsh', 'WorkBuddy'][i % 3], enabled: true, monitor: { type: 'webhook', listen: '127.0.0.1', path: `/fixture/${i}` } })));
@@ -191,6 +193,31 @@ async function checkGoals(theme, empty = false) {
       assert.ok(value.deleteLabels.length > 0, 'delete affordances missing');
       assert.deepEqual(value.deleteLabels, value.deleteLabels.map(() => '✕'), 'delete buttons must not start armed');
       assert.equal(value.scroll, true, 'long goal list must scroll');
+
+      // SPEC-026：模拟拖拽，断言把手、落点提示与 move 请求参数。
+      const drag = await win.webContents.executeJavaScript(`(() => {
+        const cards = [...document.querySelectorAll('.goal')];
+        const a = cards[0], b = cards[1], c = cards[2];
+        const handle = a.querySelector('.goal-drag');
+        const dataTransfer = new DataTransfer();
+        handle.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+        const dragging = a.classList.contains('dragging');
+        const rectB = b.getBoundingClientRect();
+        b.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer, clientY: rectB.top + 2 }));
+        const beforeMark = b.classList.contains('drop-before');
+        const rectC = c.getBoundingClientRect();
+        c.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer, clientY: rectC.top + rectC.height - 2 }));
+        const afterMark = c.classList.contains('drop-after');
+        b.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer, clientY: rectB.top + 2 }));
+        handle.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer }));
+        return { handle: !!handle, dragging, beforeMark, afterMark, aId: a.dataset.goalId, bId: b.dataset.goalId };
+      })()`);
+      await new Promise(resolve => setTimeout(resolve, 60));
+      assert.equal(drag.handle, true, 'drag handle missing');
+      assert.equal(drag.dragging, true, 'dragged card should be marked');
+      assert.equal(drag.beforeMark, true, 'upper half should show before mark');
+      assert.equal(drag.afterMark, true, 'lower half should show after mark');
+      assert.deepEqual(goalMoves[0], { id: drag.aId, beforeId: drag.bId });
     }
     writeFileSync(path.join(out, `goals-${theme}${empty ? '-empty' : ''}.png`), (await win.webContents.capturePage()).toPNG());
     results.push({ role: 'goals', theme, empty, ok: true });

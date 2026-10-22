@@ -232,6 +232,60 @@ export class GoalsStore {
     return { ok: true };
   }
 
+  /** 同组内拖拽排序（SPEC-026）；beforeId 为 null 表示移到组末。 */
+  moveGoal(id: string, beforeId: string | null): GoalMutationResult {
+    const moving = this.findGoal(id);
+    if (!moving) {
+      return { ok: false, message: '目标不存在' };
+    }
+
+    let target: Goal | undefined;
+    if (beforeId !== null) {
+      if (typeof beforeId !== 'string') {
+        return { ok: false, message: '排序参数无效' };
+      }
+      if (beforeId === id) {
+        return { ok: false, message: '不能移动到自身' };
+      }
+      target = this.findGoal(beforeId);
+      if (!target) {
+        return { ok: false, message: '目标不存在' };
+      }
+      if (target.status !== moving.status) {
+        return { ok: false, message: '只能在同一分组内排序' };
+      }
+    }
+
+    const group = this.goals.filter(
+      (goal) => goal.status === moving.status && goal.id !== id,
+    );
+    let insertIndex = group.length;
+    if (target) {
+      insertIndex = group.findIndex((goal) => goal.id === target.id);
+      if (insertIndex < 0) {
+        insertIndex = group.length;
+      }
+    }
+    const reordered = [...group];
+    reordered.splice(insertIndex, 0, moving);
+
+    const other = this.goals.filter((goal) => goal.status !== moving.status);
+    const active = moving.status === 'active' ? reordered : other;
+    const done = moving.status === 'done' ? reordered : other;
+    const next = [...active, ...done];
+
+    const unchanged =
+      next.length === this.goals.length &&
+      next.every((goal, index) => goal.id === this.goals[index]!.id);
+    if (unchanged) {
+      return { ok: true };
+    }
+    this.goals = next;
+    // 排序不是内容变更：不动 updatedAt，也不触发完成/提醒。
+    this.changed();
+    return { ok: true };
+  }
+
   /** 立即把当前内存数据写盘（退出 / 测试用）。 */
   flush(): void {
     if (this.saveTimer) {

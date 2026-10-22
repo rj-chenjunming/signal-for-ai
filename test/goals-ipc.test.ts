@@ -160,6 +160,34 @@ describe('目标 IPC：导出', () => {
   });
 });
 
+describe('目标 IPC：拖拽排序（SPEC-026）', () => {
+  it('move 接受合法参数并更新顺序', () => {
+    const h = setup();
+    h.handlers.add({ title: 'A' });
+    h.handlers.add({ title: 'B' });
+    const byTitle = (title: string) =>
+      h.store.getView().goals.find((goal) => goal.title === title)!.id;
+
+    expect(h.handlers.move({ id: byTitle('A'), beforeId: byTitle('B') }).ok).toBe(true);
+    expect(h.store.getView().goals.map((goal) => goal.title)).toEqual(['A', 'B']);
+    expect(h.handlers.move({ id: byTitle('A'), beforeId: null }).ok).toBe(true);
+    expect(h.store.getView().goals.map((goal) => goal.title)).toEqual(['B', 'A']);
+  });
+
+  it('move 校验字段类型与存在性', () => {
+    const h = setup();
+    h.handlers.add({ title: 'A' });
+    const id = firstGoalId(h.store);
+
+    expect(h.handlers.move(null).ok).toBe(false);
+    expect(h.handlers.move({ id }).ok).toBe(false);
+    expect(h.handlers.move({ id, beforeId: 1 }).ok).toBe(false);
+    expect(h.handlers.move({ beforeId: id }).ok).toBe(false);
+    expect(h.handlers.move({ id, beforeId: 'missing' }).ok).toBe(false);
+    expect(h.store.getView().goals).toHaveLength(1);
+  });
+});
+
 describe('目标 IPC：窗口入口', () => {
   it('open 调用打开回调，hide 调用隐藏回调', () => {
     const h = setup();

@@ -110,6 +110,23 @@
 .goal.is-done { opacity: .78; }
 .goal.is-done .goal-title { color: var(--panel-muted); }
 .goal-head { display: flex; align-items: center; gap: 7px; }
+.goal-drag {
+  flex: none;
+  width: 18px;
+  height: 24px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--panel-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: grab;
+  opacity: .55;
+}
+.goal-drag:hover { background: var(--panel-hover); color: var(--panel-fg); opacity: 1; }
+.goal-drag:active { cursor: grabbing; }
+.goal.dragging { opacity: .45; }
+.goal.drop-before { border-top-color: var(--accent); box-shadow: 0 -2px 0 var(--accent); }
+.goal.drop-after { border-bottom-color: var(--accent); box-shadow: 0 2px 0 var(--accent); }
 .goal-expand {
   flex: none;
   width: 24px;

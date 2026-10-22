@@ -370,6 +370,7 @@ async function startApplication(): Promise<void> {
       goalsComplete: goalsHandlers.complete,
       goalsAddEntry: goalsHandlers.addEntry,
       goalsDeleteEntry: goalsHandlers.deleteEntry,
+      goalsMove: goalsHandlers.move,
       goalsExport: goalsHandlers.export,
       goalsHide: goalsHandlers.hide,
       openGoals: goalsHandlers.open,

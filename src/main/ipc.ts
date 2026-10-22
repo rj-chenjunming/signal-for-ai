@@ -59,6 +59,7 @@ export interface IpcHandlers {
   goalsComplete?: (request: unknown) => TaskActionResponse;
   goalsAddEntry?: (request: unknown) => TaskActionResponse;
   goalsDeleteEntry?: (request: unknown) => TaskActionResponse;
+  goalsMove?: (request: unknown) => TaskActionResponse;
   goalsExport?: () => Promise<GoalExportResult>;
   goalsHide?: () => void;
   openGoals?: () => TaskActionResponse;
@@ -136,6 +137,7 @@ export function registerIpcHandlers(handlers: IpcHandlers, logger: Logger): void
     IPC.GOALS_DELETE_ENTRY,
     (request) => handlers.goalsDeleteEntry?.(request) ?? goalsUnavailable(),
   );
+  safe(IPC.GOALS_MOVE, (request) => handlers.goalsMove?.(request) ?? goalsUnavailable());
   safe(IPC.GOALS_EXPORT, () => handlers.goalsExport?.() ?? {
     ok: false,
     message: '目标导出暂不可用',
@@ -253,6 +255,7 @@ function fallbackResponse(channel: string): unknown {
     channel === IPC.GOALS_COMPLETE ||
     channel === IPC.GOALS_ADD_ENTRY ||
     channel === IPC.GOALS_DELETE_ENTRY ||
+    channel === IPC.GOALS_MOVE ||
     channel === IPC.OPEN_GOALS
   ) {
     return { ok: false, message: '主进程处理失败' } satisfies TaskActionResponse;

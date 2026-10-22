@@ -33,6 +33,7 @@ export interface GoalsHandlers {
   complete: (request: unknown) => TaskActionResponse;
   addEntry: (request: unknown) => TaskActionResponse;
   deleteEntry: (request: unknown) => TaskActionResponse;
+  move: (request: unknown) => TaskActionResponse;
   export: () => Promise<GoalExportResult>;
   hide: () => void;
   open: () => TaskActionResponse;
@@ -132,6 +133,21 @@ export function createGoalsHandlers(
         return invalidRequest();
       }
       return store.deleteEntry(goalId, entryId);
+    },
+
+    move: (request) => {
+      if (!isRecord(request)) {
+        return invalidRequest();
+      }
+      const id = stringField(request, 'id');
+      if (id === null) {
+        return invalidRequest();
+      }
+      const beforeId = request['beforeId'];
+      if (beforeId !== null && typeof beforeId !== 'string') {
+        return invalidRequest();
+      }
+      return store.moveGoal(id, beforeId);
     },
 
     export: async () => {

@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld('aiIndicator', {
   completeGoal: ok,
   addGoalEntry: ok,
   deleteGoalEntry: ok,
+  moveGoal: async (id, beforeId) => {
+    ipcRenderer.send('ui-goal-move', { id, beforeId });
+    return { ok: true };
+  },
   exportGoals: async () => ({ ok: true, path: 'C:/fixture/goals.md' }),
   hideGoals: async () => undefined,
   openGoals: async () => { ipcRenderer.send('ui-goal-open'); return { ok: true }; },

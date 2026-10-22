@@ -64,6 +64,8 @@ export const IPC = Object.freeze({
   GOALS_COMPLETE: 'goals:complete',
   GOALS_ADD_ENTRY: 'goals:addEntry',
   GOALS_DELETE_ENTRY: 'goals:deleteEntry',
+  /** 同组内拖拽排序（SPEC-026）。 */
+  GOALS_MOVE: 'goals:move',
   /** 一键导出全部目标与记录（主进程弹保存对话框）。 */
   GOALS_EXPORT: 'goals:export',
   /** 隐藏目标窗口（Esc / ✕）。 */
@@ -142,6 +144,10 @@ export interface InvokeMap {
     request: { goalId: string; entryId: string };
     response: TaskActionResponse;
   };
+  [IPC.GOALS_MOVE]: {
+    request: { id: string; beforeId: string | null };
+    response: TaskActionResponse;
+  };
   [IPC.GOALS_EXPORT]: { request: void; response: GoalExportResult };
   [IPC.GOALS_HIDE]: { request: void; response: void };
   [IPC.OPEN_GOALS]: { request: void; response: TaskActionResponse };
@@ -186,6 +192,8 @@ export interface RendererApi {
     text: string,
   ): Promise<TaskActionResponse>;
   deleteGoalEntry(goalId: string, entryId: string): Promise<TaskActionResponse>;
+  /** 同组内拖拽排序；beforeId 为 null 表示移到组末。 */
+  moveGoal(id: string, beforeId: string | null): Promise<TaskActionResponse>;
   exportGoals(): Promise<GoalExportResult>;
   hideGoals(): Promise<void>;
   openGoals(): Promise<TaskActionResponse>;

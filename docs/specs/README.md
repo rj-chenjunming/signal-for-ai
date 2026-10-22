@@ -5,6 +5,7 @@
 | Spec ID | 文档 | 类型 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
 | BASELINE-000 | [当前基线](000-baseline.md) | 接管现状 | observed | 从当前提交核对，不补造历史 TDD |
+| SPEC-026 | [目标卡片拖拽排序](026-goal-reorder.md) | feature（交互） | done | 用户 2026-10-22 真机确认「验证通过了」；Red 6失败 → Green 40；全量 918、check:ui/check:goals PASS |
 | SPEC-025 | [悬浮灯「目标」行与新目标图标](025-overlay-goals-row.md) | feature（显示集成） | done | 用户 2026-10-22 12:31 真机确认「没问题」；Red 3失败 → Green 56；全量 909、check:ui 31、check:goals PASS |
 | SPEC-024 | [目标清单（独立窗口/进度/时间线/导出）](024-goals.md) | feature | done | 用户 2026-10-22 12:21 重启真机确认通过；全量 897、smoke、check:ui、check:goals 通过 |
 | SPEC-023 | [dsh 点击后窗口无法关闭（回归）](023-dsh-close-after-focus.md) | bugfix（回归） | done | dsh 一律单实例恢复、不再 Win32 最小化；Red 2失败/Green 114、全量 863；真机 1.786s，用户确认 X 正常 |

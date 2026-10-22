@@ -112,6 +112,8 @@ const api: RendererApi = {
     ipcRenderer.invoke(IPC.GOALS_ADD_ENTRY, { goalId, kind, text }),
   deleteGoalEntry: (goalId: string, entryId: string): Promise<TaskActionResponse> =>
     ipcRenderer.invoke(IPC.GOALS_DELETE_ENTRY, { goalId, entryId }),
+  moveGoal: (id: string, beforeId: string | null): Promise<TaskActionResponse> =>
+    ipcRenderer.invoke(IPC.GOALS_MOVE, { id, beforeId }),
   exportGoals: (): Promise<GoalExportResult> => ipcRenderer.invoke(IPC.GOALS_EXPORT),
   hideGoals: (): Promise<void> => ipcRenderer.invoke(IPC.GOALS_HIDE),
   openGoals: (): Promise<TaskActionResponse> => ipcRenderer.invoke(IPC.OPEN_GOALS),

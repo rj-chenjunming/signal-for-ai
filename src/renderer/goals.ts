@@ -37,6 +37,7 @@
   const entryKinds = new Map<string, AiGoalEntryKind>();
   let toastTimer: number | null = null;
   let pendingEntryFocus: string | null = null;
+  let draggingGoalId: string | null = null;
 
   function el<K extends keyof HTMLElementTagNameMap>(
     tag: K,
@@ -164,6 +165,28 @@
 
     const head = el('div', 'goal-head');
     const isExpanded = expanded.has(goal.id);
+
+    // SPEC-026：拖拽把手是唯一的拖动起点，避免在输入框/滑杆上误触排序。
+    const dragHandle = el('button', 'goal-drag', '⠿');
+    dragHandle.type = 'button';
+    dragHandle.draggable = true;
+    dragHandle.title = '拖拽排序';
+    dragHandle.setAttribute('aria-label', '拖拽排序');
+    dragHandle.addEventListener('dragstart', (event) => {
+      draggingGoalId = goal.id;
+      card.classList.add('dragging');
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', goal.id);
+      }
+    });
+    dragHandle.addEventListener('dragend', () => {
+      draggingGoalId = null;
+      card.classList.remove('dragging');
+      clearDropMarks();
+    });
+    head.appendChild(dragHandle);
+
     const expandBtn = el('button', 'goal-expand', isExpanded ? '▾' : '▸');
     expandBtn.type = 'button';
     expandBtn.setAttribute('aria-expanded', String(isExpanded));
@@ -206,6 +229,53 @@
     });
     head.appendChild(deleteBtn);
     card.appendChild(head);
+
+    // 落点判定：同一分组内才允许放置；上半 -> 插到该卡之前，下半 -> 之后。
+    card.addEventListener('dragover', (event) => {
+      const source = draggingGoalId
+        ? view.goals.find((item) => item.id === draggingGoalId)
+        : undefined;
+      if (!source || source.status !== goal.status || source.id === goal.id) {
+        return;
+      }
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'move';
+      }
+      const rect = card.getBoundingClientRect();
+      const after = event.clientY > rect.top + rect.height / 2;
+      clearDropMarks();
+      card.classList.add(after ? 'drop-after' : 'drop-before');
+    });
+    card.addEventListener('dragleave', (event) => {
+      const related = event.relatedTarget;
+      if (related instanceof Node && card.contains(related)) {
+        return;
+      }
+      card.classList.remove('drop-before', 'drop-after');
+    });
+    card.addEventListener('drop', (event) => {
+      const source = draggingGoalId
+        ? view.goals.find((item) => item.id === draggingGoalId)
+        : undefined;
+      if (!source || source.status !== goal.status || source.id === goal.id) {
+        return;
+      }
+      event.preventDefault();
+      const rect = card.getBoundingClientRect();
+      const after = event.clientY > rect.top + rect.height / 2;
+      const group = view.goals.filter((item) => item.status === goal.status);
+      const index = group.findIndex((item) => item.id === goal.id);
+      const beforeId = after
+        ? index >= 0 && index + 1 < group.length
+          ? group[index + 1]!.id
+          : null
+        : goal.id;
+      const movingId = source.id;
+      draggingGoalId = null;
+      clearDropMarks();
+      void run(() => api!.moveGoal(movingId, beforeId));
+    });
 
     const bar = el('div', 'goal-bar');
     const fill = el('i');
@@ -411,6 +481,13 @@
     row.appendChild(issueBtn);
     row.appendChild(sendBtn);
     return row;
+  }
+
+  /** 清理所有卡片的落点提示（拖拽结束 / 重绘前）。 */
+  function clearDropMarks(): void {
+    for (const node of Array.from(document.querySelectorAll('.goal.drop-before, .goal.drop-after'))) {
+      node.classList.remove('drop-before', 'drop-after');
+    }
   }
 
   /** 两段式删除：第一次点变成「确认」，3 秒内再点才执行。 */
