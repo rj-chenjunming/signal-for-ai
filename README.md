@@ -4,9 +4,9 @@ Windows 桌面悬浮指示灯，用来同时盯住多个 AI 工具（WorkBuddy /
 
 另外内置一个独立的**目标清单**：长期目标、手动进度、进展 / 问题时间线、拖拽排序、Markdown 导出，悬浮灯上还会显示一行目标摘要。应用自己的进展也可以由 AI/脚本自动写入目标。
 
-| AI 任务状态 | 目标清单 |
+| 悬浮灯（含目标行） | 任务面板 |
 |---|---|
-| ![灯带预览](./deliverables/strip-preview.png) | ![目标窗口](./deliverables/goals-window.png) |
+| ![悬浮灯](./deliverables/overlay-current.png) | ![任务面板](./deliverables/panel-current.png) |
 
 ---
 
@@ -328,9 +328,11 @@ tasks:
 
 有进行中目标时，灯带底部会多一行：**目标图标 + 平均进度环 + `目标 N`**，点击打开目标窗口；全部完成后该行消失。
 
-| 贴侧边：竖排点阵 | 贴顶部：横排点阵 |
+| 贴侧边：竖排点阵（52×205） | 贴顶部：横排点阵（201×56） |
 |---|---|
 | ![竖排点阵](./deliverables/dock-vertical.png) | ![横排点阵](./deliverables/dock-horizontal.png) |
+
+> 以上截图均由 `scripts/readme-shots.cjs` 使用当前 `dist/renderer` 的真实渲染生成（fixture 数据，不读本机配置/会话）。
 
 ### 任务面板
 
@@ -394,6 +396,8 @@ jump:
 ## 目标清单
 
 独立的「目标清单」窗口（SPEC-024 ~ SPEC-027），与 AI 任务状态互不影响：
+
+![目标清单窗口](./deliverables/goals-window.png)
 
 - **入口**：托盘右键菜单 →「目标清单…」；或任务面板标题栏的目标图标。
 - **悬浮灯**：有进行中目标时，灯带底部显示「目标 N」+ 平均进度环；点击打开目标窗口。
