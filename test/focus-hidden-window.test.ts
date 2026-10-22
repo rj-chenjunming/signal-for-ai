@@ -110,7 +110,7 @@ it('keeps the native WorkBuddy route for a hidden windowTitle target', async () 
   expect(exec.mock.calls.some(([, args]) => args.at(-1)?.includes('LAMPDSHREVEAL'))).toBe(false);
 });
 
-it('keeps Win32 foreground recovery for a visible windowTitle dsh target', async () => {
+it('SPEC-023: visible dsh windowTitle uses the dsh handoff, not Win32 recovery', async () => {
   const titleTask: TaskConfig = {
     ...task,
     jump: { terminal: { type: 'windowTitle', match: 'DeepSeek Harness', processNames: ['DeepSeek Harness.exe'] } },
@@ -128,8 +128,8 @@ it('keeps Win32 foreground recovery for a visible windowTitle dsh target', async
   });
   const service = new FocusService({ spawner: { exec, spawn: vi.fn(() => true) }, tasks: () => [task] });
   expect((await service.focusTerminal(titleTask, titleTask.jump)).ok).toBe(true);
-  expect(exec.mock.calls.some(([, args]) => args.at(-1)?.includes('LAMPFOCUS'))).toBe(true);
-  expect(exec.mock.calls.some(([, args]) => args.at(-1)?.includes('LAMPDSHREVEAL'))).toBe(false);
+  expect(exec.mock.calls.some(([, args]) => args.at(-1)?.includes('LAMPDSHREVEAL'))).toBe(true);
+  expect(exec.mock.calls.some(([, args]) => args.at(-1)?.includes('LAMPFOCUS'))).toBe(false);
 });
 
 it('honors case-insensitive configured process names and an explicit title filter', async () => {

@@ -755,12 +755,15 @@ export class FocusService {
         // SPEC-020：windowProcess 目标保持原行为；windowTitle 目标只在“隐藏窗口”场景
         // 才按进程身份走自身单实例恢复。可见/最小化的 windowTitle 窗口继续用 Win32，
         // 避免把本来能抢到前台的可见窗口交给 handoff 后反而前台确认失败（真机回归）。
+        const isDsh = declaredProcessNames.includes(name) &&
+          name === 'deepseek harness' && task.monitor.type === 'dsh';
+        // SPEC-023：dsh 的 visible/minimized/hidden 目标一律走自身单实例恢复。
+        // 可见时若走 Win32 的 SW_MINIMIZE→SW_RESTORE，会复现 SPEC-014 的
+        // “恢复后 X 无法关闭”回归；handoff 是 dsh 认可的恢复路径。
+        if (isDsh) return this.revealNativeWindow(candidate, 'dsh');
         const useNative = declaredProcessNames.includes(name) &&
           (terminal.type === 'windowProcess' || fromHidden);
-        if (useNative) {
-          if (name === 'workbuddy') return this.revealNativeWindow(candidate, 'workbuddy');
-          if (name === 'deepseek harness' && task.monitor.type === 'dsh') return this.revealNativeWindow(candidate, 'dsh');
-        }
+        if (useNative && name === 'workbuddy') return this.revealNativeWindow(candidate, 'workbuddy');
         return this.focusExistingWindow(candidate);
       };
       let activated = win !== null && await activate(win, hiddenCandidate);

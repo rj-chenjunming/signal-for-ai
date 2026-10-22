@@ -13,11 +13,23 @@ export function buildNativeWindowRevealScript(pid: number, hwnd: number, app: Na
   }
   return `
 $ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class LampNativeOwner { [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd); [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); }'
+Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class LampNativeOwner { [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd); [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach); [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId(); }'
 [uint32]$ownerPid = 0
 $nativeHandle = [IntPtr]${hwnd}
 [void][LampNativeOwner]::GetWindowThreadProcessId($nativeHandle, [ref]$ownerPid)
 if ($ownerPid -ne ${pid}) { throw '${profile.label} window owner changed' }
+function Set-LampForeground($h) {
+  [void][LampNativeOwner]::BringWindowToTop($h)
+  [void][LampNativeOwner]::SetForegroundWindow($h)
+  if ([LampNativeOwner]::GetForegroundWindow() -ne $h) {
+    [uint32]$fgPid = 0
+    [uint32]$fgThread = [LampNativeOwner]::GetWindowThreadProcessId([LampNativeOwner]::GetForegroundWindow(), [ref]$fgPid)
+    [uint32]$me = [LampNativeOwner]::GetCurrentThreadId()
+    [void][LampNativeOwner]::AttachThreadInput($fgThread, $me, $true)
+    [void][LampNativeOwner]::SetForegroundWindow($h)
+    [void][LampNativeOwner]::AttachThreadInput($fgThread, $me, $false)
+  }
+}
 $targetProcess = Get-Process -Id ${pid} -ErrorAction Stop
 if ($targetProcess.ProcessName -ine '${profile.processName}' -or $targetProcess.HasExited) { throw '${profile.label} owner is unavailable' }
 $executable = $targetProcess.Path
@@ -30,12 +42,15 @@ try {
     [void][LampNativeOwner]::ShowWindow($nativeHandle, 9)
     Start-Sleep -Milliseconds 120
   }
+  # SPEC-023：不做最小化复位；可见但未聚焦时用温和的前台补齐。
   # SPEC-022：前台确认并入本脚本，成功 marker 只在真实前台时输出。
-  # 轮询最多约 1s，避免 handoff 后前台切换尚未完成就误判失败。
+  # 轮询最多约 2.5s：handoff 与前台切换可能异步完成，单次 SetForegroundWindow
+  # 失败时重试（含 AttachThreadInput），但不做任何 minimize/restore 往返。
   $foreground = $false
-  for ($i = 0; $i -lt 20; $i++) {
+  for ($i = 0; $i -lt 25; $i++) {
     if ([LampNativeOwner]::GetForegroundWindow() -eq $nativeHandle) { $foreground = $true; break }
-    Start-Sleep -Milliseconds 50
+    Set-LampForeground $nativeHandle
+    Start-Sleep -Milliseconds 100
   }
   if (!$foreground) { throw '${profile.label} foreground not confirmed' }
   Write-Output '${profile.marker}'

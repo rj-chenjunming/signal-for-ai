@@ -45,7 +45,10 @@ function makeSpawner(results: Record<string, boolean> = {}, execOut = ''): FakeS
     },
     async exec(command, args): Promise<ExecResult> {
       calls.push({ kind: 'exec', command, args });
-      const stdout = args.join(' ').includes('LAMPFOCUS') ? 'LAMPFOCUS ok=True' : execOut;
+      const joined = args.join(' ');
+      const stdout = joined.includes('LAMPDSHREAL') || joined.includes('LAMPWORKBUDDYREVEAL')
+        ? 'LAMPDSHREAL ok=True'
+        : joined.includes('LAMPFOCUS') ? 'LAMPFOCUS ok=True' : execOut;
       return { ok: true, stdout, stderr: '', code: 0 };
     },
   };

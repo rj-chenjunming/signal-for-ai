@@ -48,6 +48,13 @@ it('SPEC-022: native reveal script confirms foreground before success marker', (
   expect(script.indexOf('GetForegroundWindow')).toBeLessThan(script.indexOf('LAMPDSHREVEAL ok=True'));
 });
 
+it('SPEC-023: native reveal never minimizes the dsh window', () => {
+  const script = buildDshNativeRevealScript(34092, 527050);
+  expect(script).not.toContain('ShowWindow($nativeHandle, 6)');
+  expect(script).toContain('BringWindowToTop');
+  expect(script).toContain('SetForegroundWindow');
+});
+
 it('restores a still-minimized dsh window after the native handoff', async () => {
   const { service, exec } = fixture(false);
   await service.focusTerminal(task, task.jump);
