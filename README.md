@@ -1,14 +1,29 @@
 # AI 任务状态指示灯（ai-task-indicator）
 
-Windows 桌面悬浮指示灯，用于实时监控多个 AI 工具（WorkBuddy / DeepSeek Harness / Codex 等）并行任务的执行状态。
+Windows 桌面悬浮指示灯，用来同时盯住多个 AI 工具（WorkBuddy / DeepSeek Harness / Codex 等）的并行任务：七态颜色、托盘常驻、完成通知，点击直接回到任务现场。
 
-托盘常驻 + 桌面置顶指示灯，七态颜色一眼可辨；任务完成或失败时弹窗 + 提示音；点击可直接跳回任务现场 —— 包括**经附带的 Chrome 扩展精确切回已打开的那个浏览器标签页**，而不是又新开一个。
+另外内置一个独立的**目标清单**：长期目标、手动进度、进展 / 问题时间线、拖拽排序、Markdown 导出，悬浮灯上还会显示一行目标摘要。应用自己的进展也可以由 AI/脚本自动写入目标。
 
-另有一个独立的**目标清单**窗口：长期目标、手动进度、只追加的时间线（进展 / 问题 / 完成），一键导出 Markdown。
+| AI 任务状态 | 目标清单 |
+|---|---|
+| ![灯带预览](./deliverables/strip-preview.png) | ![目标窗口](./deliverables/goals-window.png) |
 
-当前 dsh + WorkBuddy + Codex 桌面组合使用 [三工具模板](./config.desktop.example.yaml)，配置与信号边界见 [Windows 验收指南](./docs/development/desktop-validation.md)。SPEC-002 已完成云端代码验证，实际窗口切换仍需 Windows 真机验收；目标清单已由 [SPEC-024](./docs/specs/024-goals.md) 实现，真机验收结果见该规格。
+---
 
-![灯带预览](./deliverables/strip-preview.png)
+## 功能一览
+
+| 能力 | 说明 |
+|---|---|
+| **多工具监控** | 六种监控器：`process` / `log` / `webhook` / `dsh` / `sqlite` / `codex` |
+| **七态指示灯** | `idle` / `starting` / `running` / `waiting` / `success` / `failed` / `unknown`，托盘 + 桌面悬浮灯同色系 |
+| **悬浮灯** | 单灯或灯带；可拖到左/右/顶部自动收成点阵；有进行中目标时多一行「目标 N」+ 平均进度环 |
+| **任务面板** | 点托盘/悬浮灯展开，列出每个任务的状态、耗时、最近消息、操作按钮 |
+| **通知** | `waiting` / `success` / `failed` 默认弹窗 + 提示音；30s 去重；全屏时免打扰 |
+| **点击跳转** | 终端/窗口/目录/日志多级降级；Web 任务可经扩展切回已打开的浏览器标签 |
+| **目标清单** | 进度、时间线、完成、删除、拖拽排序、Markdown 导出，数据本地持久化 |
+| **目标同步** | `goal-sync` CLI 写入收件箱，运行中的应用约 1 秒导入为时间线记录 |
+
+技术栈刻意保持极简：**Electron + strict TypeScript + 原生 DOM + tsc**，没有 UI 框架、没有打包器；生产依赖只有 `electron` 与 `yaml`。
 
 ---
 
@@ -16,36 +31,31 @@ Windows 桌面悬浮指示灯，用于实时监控多个 AI 工具（WorkBuddy /
 
 - [它解决什么问题](#它解决什么问题)
 - [快速开始](#快速开始)
-- [六种监控方式如何配置](#六种监控方式如何配置)
-- [配置文件说明](#配置文件说明)
+- [六种监控方式](#六种监控方式)
+- [配置说明](#配置说明)
 - [状态与颜色](#状态与颜色)
-- [浮窗的两个形态（含边缘停靠）](#浮窗的两个形态含边缘停靠)
-- [目标清单（SPEC-024）](#目标清单spec-024)
-- **⚠️ 已知限制：跳转能做到什么程度**（先读这一节）
-- [浏览器扩展：精确切回已打开的标签页](#浏览器扩展精确切回已打开的标签页)
-- [开发与打包](#开发与打包)
-- [specTDD 开发流程](#spectdd-开发流程)
-- [验证步骤](#验证步骤)
+- [悬浮灯与任务面板](#悬浮灯与任务面板)
+- [通知与点击跳转](#通知与点击跳转)
+- [浏览器扩展](#浏览器扩展)
+- [目标清单](#目标清单)
+- [开发与测试](#开发与测试)
+- [验证与已知限制](#验证与已知限制)
+- [文档](#文档)
 - [设计出处](#设计出处)
 
 ---
 
 ## 它解决什么问题
 
-同时跑多个 AI CLI 任务时，你没法一直盯着终端。常见痛点：
+同时跑多个 AI 任务时，你没法一直盯着每个终端：
 
-- 任务卡在「等待授权」，你没注意到，白等半小时；
-- 某个任务崩了，另外三个还在跑，你分不清哪个挂了；
+- 任务卡在「等待授权」，你没注意，白等半小时；
+- 某个任务崩了，另外几个还在跑，分不清哪个挂了；
 - 想看某个任务的状态，必须切窗口 + 找对标签页。
 
-这个应用把这些状态收到一个常驻托盘图标 + 一个桌面小灯上。
+这个应用把这些状态收到托盘图标 + 桌面小灯 + 任务面板里。
 
-```
-托盘图标        绿=空闲  蓝闪=运行中  黄闪=等待授权  绿✓=已完成  红=失败  灰=失联
-                右上角数字 = 正在运行的任务数
-悬浮灯          桌面右上角 28px 圆点，同色系，running 时有呼吸动画
-任务面板        点托盘左键展开，列出每个任务的状态/耗时/最近消息
-```
+而目标清单解决另一半问题：长期想推进的事（例如「把 AI 信号灯做出来」）不该散落在便签和聊天记录里。每条目标有进度、时间线（进展 / 问题 / 完成），周五回看或导出 Markdown 都很直接；AI 完成一个开发切片后，也可以用命令自动补一条进展。
 
 ---
 
@@ -53,71 +63,68 @@ Windows 桌面悬浮指示灯，用于实时监控多个 AI 工具（WorkBuddy /
 
 ### 环境要求
 
-- Windows 10/ 11
-- Node.js ≥ 20
+- Windows 10 / 11
+- Node.js ≥ 20（仅构建/测试）；启动助手推荐 Node 24，至少 22.5（SQLite 监控会另起系统 Node 使用 `node:sqlite`）
 
 ### 安装与运行
-
-Windows 本地使用可以双击仓库根目录的 [启动指示灯.cmd](./启动指示灯.cmd)（推荐系统 Node 24，至少 22.5）。它沿用 `config.local.yaml`，仅在缺失时从桌面模板创建，缺构建产物时自动构建；不会覆盖已有配置或自动联网安装依赖。若本机仓库目录内 Electron 运行异常，启动助手会校验并使用临时目录的同版本副本。保留整个仓库，不要只复制这一个 cmd 文件。启动窗口可以最小化，从托盘菜单退出程序；源码更新后先运行 `npm run build` 再启动。
-
-仅检查环境而不开界面可运行 `node scripts/start-desktop.mjs --check`。启动失败时窗口保留错误信息；依赖缺失仍需先按下方步骤安装。
 
 ```bash
 # 1. 安装依赖
 npm install
 
-# 2a. 一键冒烟自检（不开窗口，~2秒，22 项断言）
+# 2a. 无窗口冒烟自检（真实 HTTP/日志/状态机，约 1–2 秒）
 npm run smoke
 
-# 2b. 用演示配置启动 GUI（config.demo.yaml 里三个任务都已 enabled: true）
+# 2b. 用演示配置启动 GUI
 npm run start:demo
 
-# 2c. 或者用你自己的配置
+# 2c. 或者用自己的配置
 npm run build && npm start -- --config D:/path/to/your-config.yaml
 ```
 
-首次运行会自动在 `%USERPROFILE%\.ai-task-indicator\config.yaml` 落盘一份配置模板，直接编辑该文件即可。
+日常最省事的方式是双击仓库根目录的 [`启动指示灯.cmd`](./启动指示灯.cmd)（推荐 Node 24）。它沿用 `config.local.yaml`，缺失时从桌面模板创建、缺构建产物时自动构建；启动窗口可以最小化，退出请走托盘菜单。保留整个仓库，不要只复制这一个 cmd 文件。
 
-> **请用 `npm start` 而不是 `npx electron .`**
-> 启动器脚本会自动处理两个会让 GUI 静默失效的环境问题（都实测踩过，详见下方「启动失败排查」）：
-> 1. `ELECTRON_RUN_AS_NODE=1` —— 部分 IDE 终端 / CI 会预设它，会让 electron.exe 退化成普通 Node 解释器；
-> 2. GPU 进程崩溃 —— 无显卡 / 远程桌面 / 虚拟机里会 `FATAL: GPU process isn't usable. Goodbye.`。
->
-> 本应用是纯 2D UI，禁用 GPU 加速完全无损。需要排查渲染问题时用 `npm start -- --enable-gpu`。
+源码更新后：`npm run build`，再重启应用。仅检查环境可用 `node scripts/start-desktop.mjs --check`。
 
-> **`npm run smoke` 是最快的验证方式**：它不依赖 Electron 窗口，会真实启动本地 HTTP 服务读写日志文件、驱动状态机，验证「配置加载 → 日志判定 → 状态流转 → Webhook 回调」这条主链路。任何时候改了核心逻辑，先跑它。
+### 配置放在哪
+
+首次运行会落盘一份模板到：
+
+```
+%USERPROFILE%\.ai-task-indicator\config.yaml
+```
+
+路径优先级：`--config` > `%USERPROFILE%\.ai-task-indicator\config.yaml` > `%APPDATA%\ai-task-indicator\config.yaml` > 落盘模板。
 
 ### 启动失败排查
 
 | 现象 | 原因 | 处理 |
-|------|------|------|
-| `Cannot read properties of undefined (reading 'requestSingleInstanceLock')` | `ELECTRON_RUN_AS_NODE=1` 让 electron.exe 退化成普通 Node | 用 `npm start`（自动清除），或 `set ELECTRON_RUN_AS_NODE= && npx electron .` |
-| `FATAL: GPU process isn't usable. Goodbye.` | GPU 进程以 `0xC0000409` 崩溃 | 用 `npm start`（自动加 `--disable-gpu` 等参数） |
-| 双击图标能开、命令行启动失败 | 上述变量只存在于某些终端会话 | 同上，统一走 `npm start` |
-| 日志里 `进程枚举子进程第 N 次重启` 后任务转 `unknown` | `Get-CimInstance` 被沙箱/安全策略拦截 | 正常降级行为，进程型监控不可用；改用 log 型或 webhook 型 |
+|---|---|---|
+| `Cannot read properties of undefined (reading 'requestSingleInstanceLock')` | `ELECTRON_RUN_AS_NODE=1` 让 electron 退化成普通 Node | 用 `npm start`（自动清除） |
+| `FATAL: GPU process isn't usable. Goodbye.` | 无显卡 / 远程桌面 / 虚拟机里 GPU 进程崩溃 | 用 `npm start`（自动加 `--disable-gpu` 等参数） |
+| 双击能开、命令行启动失败 | 上述变量只存在于某些终端会话 | 统一走 `npm start` |
+| 日志里「进程枚举子进程第 N 次重启」后任务转 `unknown` | `Get-CimInstance` 被安全策略拦截 | 正常降级，改用 `log` / `webhook` 型 |
 
-应用日志在 `%APPDATA%\ai-task-indicator\logs\ai-task-indicator-YYYY-MM-DD.log`，排查问题时先看它。
+应用日志：`%APPDATA%\ai-task-indicator\logs\ai-task-indicator-YYYY-MM-DD.log`。
 
-> 如果 `npm install` 卡在 electron 下载或报 rollup 平台包缺失，属环境问题，可用项目内置的补齐脚本：
-> ```bash
-> node scripts/fix-missing-deps.mjs @rollup/rollup-win32-x64-msvc
-> ```
+> 启动器会处理两个实测踩过的环境问题：`ELECTRON_RUN_AS_NODE=1` 和 GPU 崩溃。本应用是纯 2D UI，禁用 GPU 加速没有损失；需要排查渲染问题时用 `npm start -- --enable-gpu`。
 
 ---
 
-## 六种监控方式如何配置
+## 六种监控方式
 
-配置文件的 `tasks` 数组里，每个任务用 `monitor.type` 指定监控方式：`process` / `log` / `webhook` / `dsh` / `sqlite` / `codex`。
+配置文件的 `tasks` 数组里，每个任务用 `monitor.type` 指定监控方式：
 
-Codex 使用 `type: codex` 读取本地 `.codex/sessions` 的结构化 rollout 事件。支持 `sessionsDir`、`intervalMs`（默认 2000）、`activeWithinMs`（默认 300000）；不会在启动时重放历史完成。可选 `approvalEventsFile` 配合用户信任的官方 Hook，在请求审批时黄灯、对应工具返回后恢复；仅 rollout 不保证审批等待。安装及边界见 [授权 Hook 指南](./docs/development/codex-approval-hooks.md) 与 [桌面指南](./docs/development/desktop-validation.md)。
+| 类型 | 适用场景 | 信号来源 | 关键点 |
+|---|---|---|---|
+| `process` | 有常驻进程的任务 | `Get-CimInstance Win32_Process` | 进程名 + 命令行匹配；退出码判定；可配 `fallbackLog` |
+| `log` | 往日志写输出的 CLI | 增量 tail + 正则 | 支持 `**` 通配；`failed` 优先级最高 |
+| `webhook` | 自己的脚本 / CI 能主动上报 | 本地 HTTP（127.0.0.1） | token、心跳超时、`GET /api/tasks` |
+| `dsh` | DeepSeek Harness 实例 | 轮询 `POST /api/session/list` | 零侵入；自动发现端口；隧道型配 `sshHost` |
+| `sqlite` | 状态写在 SQLite 的应用 | 只读查询数据库 | 状态 + 新鲜度双条件；可要求进程存在 |
+| `codex` | OpenAI Codex CLI | 本地 rollout 事件 | 不重放历史完成；可选审批 Hook |
 
-Codex 回合完成后保留绿灯，点击确认或默认十分钟到期后显示灰色空闲行；新的回合显示蓝灯。采集器分块追平并保留长回合的开始证据，历史未知会话不会抹掉本轮明确完成；首次读取很大的会话文件可能需要数轮轮询。修复与验证见 [SPEC-010](./docs/specs/010-codex-completion-continuity.md)。
-
-### 方式一：process —— 监听本地进程与命令行参数
-
-适用：任务有明确的常驻进程（如 WorkBuddy 主进程、某个 IDE、CI runner）。
-
-原理：应用启动一个**长驻 PowerShell 子进程**，周期性输出 `Get-CimInstance Win32_Process` 的结果（JSON 行），主进程按进程名 + 命令行子串匹配判断任务存活。
+### process —— 进程与命令行
 
 ```yaml
 tasks:
@@ -127,75 +134,49 @@ tasks:
     monitor:
       type: process
       match:
-        # match 数组之间是「或」；单个 match 内 processNames 与 cmdlineContains 是「与」
         - processNames: [node.exe, workbuddy.exe]
           cmdlineContains: [workbuddy]
       onExit:
-        successExitCodes: [0]      # 退出码 0 算成功，其余算失败
-        graceMs: 3000               # 进程消失后等3s 再定状态，留出日志刷尾时间
-      fallbackLog:                 # 可选：没匹配到进程时的兜底信号源
+        successExitCodes: [0]
+        graceMs: 3000
+      fallbackLog:
         paths: ["%USERPROFILE%/.workbuddy/logs/*.log"]
         stateOnNewLine: running
     jump:
       terminal: { type: windowTitle, match: WorkBuddy }
-      cwd: "%USERPROFILE%"
 ```
 
-**要点**
+- `match` 数组之间为「或」，单个 match 内进程名与命令行子串为「与」。
+- 进程消失后等 `graceMs`，再按 `successExitCodes` 判 `success` / `failed`。
+- 想省内存可设 `app.processPollMode: onDemand`（每轮 spawn 一次，慢但轻）。
 
-- 进程存在 → `running`；进程消失 → 等 `graceMs` → 按退出码判`success` / `failed`。
-- `cmdlineContains` 强烈建议填写。本机 `node.exe` 可能同时跑着好几个项目，只按进程名匹配会误报。
-- **实现说明**：出于兼容性考虑，此处不使用已被 Windows 10 21H1 弃用的 `wmic`；`tasklist` 又拿不到命令行，因此采用 `Get-CimInstance`。
-- 若想省内存可设 `app.processPollMode: onDemand`（每轮 spawn 一次，慢但轻量）。
-
-### 方式二：log —— 轮询日志文件或目录变化
-
-适用：没有独立进程，但会往日志文件写输出的任务（多数 AI CLI 都属于这类，如 dsh、pytest、仿真脚本）。
-
-原理：递归扫描配置的路径，对每个文件做**增量 tail**（只读新增字节），用正则规则把日志行判定成状态。
+### log —— 日志文件
 
 ```yaml
 tasks:
   - id: dsh-harness
-    name: dsh 仿真任务
-    enabled: true
     monitor:
       type: log
-      paths:
-        - "D:/projects/demo/**/*.log"   # 支持 ** 递归通配
+      paths: ["D:/projects/demo/**/*.log"]   # 不要只写目录
       readMode: tail
-      fromEndBytes: 65536          # 首次接入只读末尾 64KB，避免全量重扫大文件
+      fromEndBytes: 65536
       rules:
         - state: failed
-          match: "(error|fatal|exception|failed|\\bE[0-9]{4}\\b)"
+          match: "(error|fatal|exception|failed)"
         - state: waiting
-          match: "(permission request|waiting for input|needs?_input|请确认)"
+          match: "(permission request|needs?_input|请确认)"
         - state: success
           match: "(task complete|completed|done|完成)"
         - state: running
-          match: "(running|executing|subagent|step [0-9]+)"
-      idleAfterSilenceMs: 60000    # 日志静默 60s → 转idle（防长尾任务一直显示在跑）
-    jump:
-      cwd: "D:/projects/demo"
-      openWith: notepad.exe
+          match: "(running|executing|step [0-9]+)"
+      idleAfterSilenceMs: 60000
 ```
 
-**要点**
+- `paths` 必须指向文件或带通配符的路径；只写目录会匹配到 0 个文件。
+- 正则不要写 `(?i)` 前缀（JS 不认），应用默认已忽略大小写。
+- 单条正则写错只丢那一条，其余规则照常生效。
 
-- **`paths` 必须是「文件」或「带通配符的目录」**，两种写法：
-  - 单个日志文件：`paths: ["D:/logs/run.log"]` ✅（无通配符时按精确路径匹配，需文件真实存在）
-  - 目录下的日志：`paths: ["D:/logs/**/*.log"]` ✅（递归任意层级）
-  - ⚠️ **不要只写目录**：`paths: ["D:/logs"]` 会返回 0 个文件 —— 因为「目录 = 递归所有文件」会让 `node_modules` 这类海量目录被整个扫进来。若确实要监控目录下所有日志，请写 `"D:/logs/**"` 或 `"D:/logs/**/*.log"`。
-- **正则不要写 `(?i)` 前缀**——JS 正则不认它，会被当成字面量匹配，导致所有规则静默失效。应用默认已用 `i` 标志（忽略大小写）。
-- 某条正则写错时**只有那一条被丢弃**，其余照常生效，托盘气泡会提示哪条出错。
-- `failed` 拥有最高判定优先级：同一段文本里既有 `running` 又有 `error` 时，一定判 `failed`。
-- 日志文件被截断或轮转不会导致崩溃。
-
-### 方式三：webhook —— 接收外部状态回调
-
-适用：你自己写的脚本/CI/其他工具能感知任务状态，主动上报。
-
-原理：主进程内建一个**仅监听 127.0.0.1** 的 HTTP 服务，收到 POST 后更新状态。
+### webhook —— 主动上报
 
 ```yaml
 app:
@@ -203,47 +184,29 @@ app:
 
 tasks:
   - id: remote-agent
-    name: 远程 Agent 任务
-    enabled: true
     monitor:
       type: webhook
       listen: 127.0.0.1
       path: /hook/remote-agent
       secret: change-me-local-token
       fieldMap:
-        state: $.status        # 从 JSON payload 里取字段，支持 $.a.b
+        state: $.status
         message: $.message
-        progress: $.progress
-      heartbeatTimeoutMs: 120000  # 心跳超时 → 转 unknown
+      heartbeatTimeoutMs: 120000
 ```
-
-**测试用curl**：
 
 ```bash
 curl -X POST http://127.0.0.1:17890/hook/remote-agent \
   -H "Content-Type: application/json" \
   -H "x-indicator-token: change-me-local-token" \
-  -d '{"status":"running","message":"开始执行","progress":0.2}'
+  -d '{"status":"running","message":"开始执行"}'
 
-curl -X POST http://127.0.0.1:17890/hook/remote-agent \
-  -H "Content-Type: application/json" \
-  -H "x-indicator-token: change-me-local-token" \
-  -d '{"status":"waiting","message":"等待授权"}'
+curl http://127.0.0.1:17890/api/tasks   # 读取当前所有任务状态
 ```
 
-**可用状态**：`idle` / `starting` / `running` / `waiting` / `success` / `failed` / `unknown`。非法状态返回 400，token 不匹配返回 401。
+强制 loopback、校验 Host、`timingSafeEqual` 比较 token、请求体上限 64KB、不返回 CORS 头。
 
-**安全性**：强制 loopback（不会监听 0.0.0.0）、校验 Host 头、token 用 `timingSafeEqual` 比较、请求体上限 64KB、不发 CORS 头。
-
-**读状态接口**：`GET http://127.0.0.1:17890/api/tasks` 返回当前所有任务状态（JSON）。
-
-### 方式四：dsh —— 主动轮询 DeepSeek Harness 实例（含 SSH 隧道）
-
-适用：任务跑在 dsh（DeepSeek Harness）里 —— 本地客户端、本机 web、或经 SSH 隧道暴露的远端实例。
-
-原理：**零侵入**。应用自己发现监听端口、用 `~/.dsh/.credentials.yaml` 里的明文密钥离线自签
-`dsh-auth-<sha256(authority)>` cookie，再打 `POST /api/session/list` 拿会话状态 ——
-**不需要在 dsh 里装任何东西**。
+### dsh —— 轮询 DeepSeek Harness
 
 ```yaml
 tasks:
@@ -251,34 +214,24 @@ tasks:
     name: dsh（本地客户端）
     monitor:
       type: dsh
-      authority: 127.0.0.1:19387      # cookie 名与签名都绑定它
+      authority: auto              # 自动发现本机 dsh 实例
       intervalMs: 5000
-      heartbeatTimeoutMs: 120000
-    shortLabel: 本地客户端            # 灯带上显示的短标签（不填则显示端口号）
+    shortLabel: 本地客户端
 
   - id: dsh-web
     name: dsh（远端隧道）
     monitor:
       type: dsh
       authority: 127.0.0.1:13080
-      sshHost: user@your-host         # ★ 隧道型：本机密钥必然 401，需从远端取
+      sshHost: user@your-host      # 隧道型：本机密钥必然 401，需从远端取
 ```
 
-**要点**
+- 应用会枚举监听端口、用 `~/.dsh/.credentials.yaml` 离线签 cookie，再打 `session/list`，不需要在 dsh 里装东西。
+- `authority: auto` 会自动发现并跟随端口变化（SPEC-005），首次发现约 15–20 秒。
+- 隧道型实例必须配 `sshHost`；密钥会缓存 30 分钟。
+- 连续失败 5 次 → 转 `unknown`，浮窗隐藏该行。
 
-- **隧道型实例必须配 `sshHost`**：本机密钥对隧道端口会 401（这正是识别"远端实例"的可靠信号）。
-  配上后应用会经 `ssh <host>` 读远端 `~/.dsh/.credentials.yaml`，在**本地**为该隧道端口签
-  cookie，并缓存 30 分钟。
-- 主动轮询拿不到"等待授权"的**精确**信号（关键字扫描 0 命中），只能用 `plan.pending` 近似；
-  要精确值需在 dsh 侧装插件、走 `webhook` 型上报。
-- 连续失败 5 次 → 该实例转 `unknown`（浮窗会隐藏该行）。
-
-### 方式五：sqlite —— 直接读应用的数据库
-
-适用：目标应用把任务状态写在 SQLite 库里（本项目用于 WorkBuddy）。
-
-原理：**spawn 系统 `node.exe`** 以只读方式查库。Electron 33 内置的 Node 20 没有 `node:sqlite`
-（该模块要 Node 22.5+），所以走外部 node；没装时优雅降级，不会崩。
+### sqlite —— 读应用数据库
 
 ```yaml
 tasks:
@@ -286,339 +239,298 @@ tasks:
     monitor:
       type: sqlite
       database: D:/your-appdata/.workbuddy/workbuddy.db
-      activeStatus: working      # sessions.status == 它
-      activeWithinMs: 120000     # 且 last_activity_at 在 2 分钟内 —— 两个条件缺一不可
-      requireProcess:            # 可选闸门：进程不在 -> unknown（隐藏该行）
+      activeStatus: working
+      activeWithinMs: 120000
+      requireProcess:
         - processNames: [WorkBuddy.exe]
-      notifyOnDone: true
 ```
 
-**要点**
+`activeStatus` 与 `activeWithinMs` 缺一不可：实测库里有 `status='working'` 但已静默 20 小时的遗留记录，只看状态会永远亮蓝。
 
-- **`activeStatus` 与 `activeWithinMs` 缺一不可**：实测真库里有 `status='working'` 但已静默
-  20 小时的**遗留记录**（异常退出没回写），只看 status 会永远亮蓝。
-- 该字段大小写不统一（同时存在 `terminated` / `Terminated`），比较已做归一化。
-- 「刚完成」判定用 `updated_at` 而非 `last_activity_at` —— 完成时会额外刷一次 `updated_at`，
-  它更接近"写完完成状态的那一刻"。
+### codex —— 本地 rollout 事件
+
+```yaml
+tasks:
+  - id: codex
+    monitor:
+      type: codex
+      sessionsDir: "%USERPROFILE%/.codex/sessions"
+      intervalMs: 2000
+      activeWithinMs: 300000
+      # approvalEventsFile: ...
+```
+
+- 读取 `.codex/sessions` 的结构化 rollout；不会在启动时重放历史完成。
+- 回合完成后保留绿灯，点击确认或默认十分钟到期后回到空闲；新回合重新变蓝。
+- 可选 `approvalEventsFile` 配合官方 Hook，在请求审批时黄灯。安装与边界见 [Codex 授权 Hook 指南](./docs/development/codex-approval-hooks.md)。
 
 ---
 
-## 配置文件说明
+## 配置说明
 
-**位置**：`%USERPROFILE%\.ai-task-indicator\config.yaml`
-
-**路径优先级**（`--config` 最高）：
-
-```
-1. 命令行 --config <path>
-2. %USERPROFILE%\.ai-task-indicator\config.yaml
-3. <userData>/config.yaml
-4. 都不存在 → 落盘一份模板到路径 2
-```
-
-**热重载**：保存配置文件即生效，无需重启。语法错误时**保留旧配置**并在托盘气泡提示，不会把应用搞挂。
-
-> 浮窗上那条「配置已重载」提示**只会为你在编辑器里的改动出现**。应用自己写回配置时
-> （拖动灯位置、托盘里切开关）不会弹 —— 那是自身动作的回声，弹出来只会变成噪音。
-> 同理，**写回时内容没变化就不写盘**，避免无谓地惊动文件监听器。
-
-**容错原则**：单个字段非法只丢弃该字段并记录警告，其余照常生效；非法的任务项被跳过，好任务不受影响。你会得到一份逐条说明的警告列表。
-
-完整的字段说明与 process / log / webhook 三种示例见 [`config.example.yaml`](./config.example.yaml)；
-dsh 与 sqlite 型的完整示例见 [`config.dsh.example.yaml`](./config.dsh.example.yaml)。
-
-> **本地私有取值**：部分校验脚本（`sqlite-monitor-check` / `d5-tunnel-check` / `d5-ssh-probe`）
-> 需要本机的真实 SSH 主机与数据库路径。仓库里**只保留占位符**，真实取值放在
-> `config.local.yaml`（已在 `.gitignore` 中），脚本会经 `scripts/lib/local-config.mjs`
-> 自动读取；也可用环境变量 `LAMP_SSH_HOST` / `LAMP_WORKBUDDY_DB` 覆盖。
-> 优先级：命令行参数 > 环境变量 > `config.local.yaml` > 占位符。
+- **热重载**：保存配置文件即生效，无需重启；语法错误保留旧配置并气泡提示。
+- **自身写回不回声**：拖动灯位置、托盘开关等自身写回不会触发「配置已重载」提示；内容没变化不写盘。
+- **容错**：单个字段非法只丢该字段，非法任务项跳过，其余照常生效，并给出逐条警告。
+- **示例**：
+  - [`config.example.yaml`](./config.example.yaml) —— process / log / webhook
+  - [`config.dsh.example.yaml`](./config.dsh.example.yaml) —— dsh / sqlite
+  - [`config.desktop.example.yaml`](./config.desktop.example.yaml) —— dsh + WorkBuddy + Codex 桌面组合
+  - [`config.demo.yaml`](./config.demo.yaml) —— 演示用的三个任务
+- **本地私有取值**：SSH 主机、数据库路径等只放 `config.local.yaml`（已忽略）或环境变量；仓库只保留占位符。
 
 ---
 
 ## 状态与颜色
 
 | 状态 | 颜色 | 含义 |
-|------|------|------|
+|---|---|---|
 | `idle` | 灰 | 未开始 / 已清理 |
-| `starting` | 青 | 刚发现进程或信号，正在启动 |
-| `running` | 蓝（呼吸动画） | 正在执行 |
-| `waiting` | 黄（快闪） | 等待你确认/授权—— **最容易卡住的态** |
+| `starting` | 淡蓝 | 刚发现信号，启动中 |
+| `running` | 蓝（呼吸） | 正在执行 |
+| `waiting` | 黄（快闪） | 等待确认 / 授权，最容易卡住 |
 | `success` | 绿 | 已完成（有未读标记） |
 | `failed` | 红 | 失败或等待超时 |
 | `unknown` | 深灰 | 信号超时，监控源可能失联 |
 
-**托盘聚合优先级**：`failed > waiting > running > success > starting > idle > unknown`。任何一个任务失败，整个灯变红。
+**聚合优先级**：`failed > waiting > running > success > starting > idle > unknown`。任一任务失败，整个托盘灯变红。
 
-**关键行为约定**
+**超时默认值**（可被 YAML `defaults` 覆盖）：
 
-- 任务失败后**不会自动变绿**，必须显式重置或等`dismiss_after` 清理。
-- 信号静默超过 `staleTimeoutMs`（默认 60s）转 `unknown`，避免「灯一直绿但任务早死了」。
-- `waiting` 悬挂超过 `waitingTimeoutMs`（默认 30min）转 `failed`，防悬挂。
+| 行为 | 默认 |
+|---|---|
+| `starting` 无新信号回 `idle` | 10s |
+| 信号静默转 `unknown` | 60s |
+| `waiting` 悬挂转 `failed` | 30min |
+| `success` 自动清理 | 10min |
+| 日志静默转 `idle`（`idleAfterSilenceMs`） | 60s |
+
+**几个关键约定**
+
+- 失败不会自动变绿，必须真实重试信号或显式重置。
+- 完成确认后同一完成事件不会再次点亮（确认水位）。
+- 浮窗只显示「活着」的行：`failed` / `unknown` 会被隐藏，但总灯仍会反映异常。
+- 当可显示任务 ≥ 2，或存在进行中目标时，使用灯带形态；否则缩成单灯。
 
 ---
 
-## 浮窗的两个形态（含边缘停靠）
+## 悬浮灯与任务面板
 
-悬浮灯有两种常规形态，再叠加一种**贴边后自动切换的点阵形态**：
+### 悬浮灯
 
-| 位置 | 形态 | 长什么样 |
-|------|------|----------|
-| 桌面任意处，可显示任务 ≥ 2 | 常规灯带 | 竖排：总灯在上，下面每行「小灯 + 短标签」 |
-| 桌面任意处，可显示任务 < 2 | 单灯 | 一颗圆点，干扰最小 |
-| **贴屏幕左 / 右边缘 24px 以内** | 竖排点阵 | 只剩一列圆点，**不带文字** |
-| **贴屏幕顶部 24px 以内** | 横排点阵 | 只剩一排圆点，**不带文字** |
+| 位置 | 形态 | 样子 |
+|---|---|---|
+| 桌面任意处，可显示任务 ≥ 2 | 常规灯带 | 总灯在上，下面每行「小灯 + 短标签」 |
+| 桌面任意处，可显示任务 < 2 且没有进行中目标 | 单灯 | 一颗圆点，干扰最小 |
+| 贴屏幕左/右边缘 24px 内 | 竖排点阵 | 只剩一列圆点，不带文字 |
+| 贴屏幕顶部 24px 内 | 横排点阵 | 只剩一排圆点，不带文字 |
 
-「可显示任务」= 已排除失联（`unknown`）/ 失败（`failed`）的行 ——
-浮窗里出现的默认就该是活着的（口径见 `src/shared/visibility.ts`）。
+把灯拖到屏幕左/右/上边缘松手，约 0.2 秒后自动收成点阵；拖回桌面中间恢复灯带。**不需要配置**。贴底部不变形态；跨屏摆放不算贴边，屏幕边外推仍算。
+
+有进行中目标时，灯带底部会多一行：**目标图标 + 平均进度环 + `目标 N`**，点击打开目标窗口；全部完成后该行消失。
 
 | 贴侧边：竖排点阵 | 贴顶部：横排点阵 |
 |---|---|
 | ![竖排点阵](./deliverables/dock-vertical.png) | ![横排点阵](./deliverables/dock-horizontal.png) |
-| 36×79（该时刻 2 个任务） | 75×40（该时刻 2 个任务） |
 
-> 两张图是**真实截图**（CDP 直接抓的 overlay 画布，未经修图），
-> 所以尺寸就是窗口实际像素 —— 底板的半透明在深色桌面上会更沉一些。
+### 任务面板
 
-**怎么用**：把灯拖到屏幕的左 / 右 / 上边缘松手，约 0.2 秒后它自己收敛成点阵；
-拖回桌面中间，又自动展开回带标签的灯带。**不需要任何配置**。
-
-### 这几条取舍都是实测出来的
-
-- **阈值 24px**：太小很难对准，太大则会把"只是放在旁边"误触发。
-- **顶部优先**：左上角同时贴两条边时按横排处理（横排更好认）。
-- **贴底部不变形态** —— 只做侧边与顶部。
-- **跨屏摆放不算贴边，但屏幕边上继续外推算**：这两种情况的"距离都是负的"，得再判断
-  **这条边外面还有没有别的屏** ——
-  「窗口一半在主屏、一半在副屏」是跨屏摆放，不该改形态；
-  「鼠标被屏幕边挡住、窗口探出去一点」是正常贴边动作，必须改形态。
-  两个坑都只有真机才暴露，详见 [`docs/design-decisions.md`](./docs/design-decisions.md) 的 D90 / D91。
-- **贴着的那条边钉住不动**：右停靠缩小时窗口往左收，不会越缩越离屏幕边远。
-- 点阵形态**连数量徽标一起藏掉** —— 它的定位就是"只剩一排灯"，需要数字时点开面板。
+点击托盘图标或悬浮灯展开，宽度 420 DIP、最大高度 520 DIP，列出每个任务的状态、耗时、最近消息与可用操作（切回工具 / 日志 / 目录 / 重新监控 / 标记已读）。面板跟随系统深浅色，失焦自动收起。
 
 ---
 
-## 目标清单（SPEC-024 / SPEC-025）
+## 通知与点击跳转
 
-托盘常驻应用里还带一个独立的「目标清单」窗口，用来记长期想推进的事（比如「把这个项目做出来」），与 AI 任务状态互不影响：
+**通知**：默认对 `waiting` / `success` / `failed` 弹窗 + 提示音；30 秒内同一任务重复完成只提醒一次并显示 `×N`；全屏应用时默认免打扰（仅托盘变色）。可分别关闭 `notify.popup` / `notify.sound`。
 
-- **入口**：托盘右键菜单 →「目标清单…」；或任务面板标题栏的目标图标。
-- **悬浮灯**：有进行中目标时，灯带底部多一行「目标 N」+ 平均进度环，点击直接打开目标窗口；全部完成后该行消失。
-- **每条目标**：标题（点击可改）、0–100% 手动进度、状态（进行中 / 已完成）；拖动卡片左侧把手可在同组内调整顺序，顺序会持久化并影响导出。
-- **时间线**：展开目标后追加「进展 / 问题」记录（带时间、只追加、可删除）；点「标记完成」会把进度置 100% 并自动记一条完成记录。
-- **已完成**：沉到列表底部的折叠区，仍可回看与删除。
-- **导出**：右上角「导出」把全部目标与记录写成 Markdown 文件（系统保存对话框，默认 `goals-YYYY-MM-DD.md`）。
-- **数据**：`%APPDATA%\ai-task-indicator\goals.json`（与 `config.yaml` 分开）；写盘防抖、退出前 flush、原子替换；文件损坏时保留原文件并尝试 `.bak`，不会静默清空。
-- **开发同步**：`node scripts/goal-sync.mjs --goal "AI信号灯软件开发" --text "..."` 会把一条进展写入 `goal-inbox.jsonl`，运行中的应用约 1 秒内导入（未运行则下次启动导入）；详见 [SPEC-027](./docs/specs/027-goal-progress-sync.md)。
-- **窗口行为**：560×640、无边框置顶、失焦**不**隐藏；`Esc` / `✕` 只隐藏窗口，下次打开内容还在。
+**点击跳转**：点击任务行优先回到任务现场，任何一级失败都自动降级，**永不抛异常**。
 
-![悬浮灯上的目标行](./deliverables/goals-overlay.png)
+配了 `openUrl` 的 Web 任务：
 
-不做周视图、子任务、提醒、云同步、JSON 导入导出（见 [SPEC-024](./docs/specs/024-goals.md)、[SPEC-025](./docs/specs/025-overlay-goals-row.md)、[SPEC-026](./docs/specs/026-goal-reorder.md) 与 [SPEC-027](./docs/specs/027-goal-progress-sync.md) 非目标）。
+```
+① 浏览器扩展精确切标签 → ② CDP（可选，专用调试实例）→ ③ 按窗口标题聚焦 → ④ 新开标签页
+```
+
+没配 `openUrl` 的桌面任务：
+
+```
+L1 spawn 型：执行你配置的命令（如 wt.exe new-tab -d <cwd>）
+L2 窗口级聚焦：先最小化 → 恢复 → SetForegroundWindow（以 GetForegroundWindow 真实结果为准）
+L3 目录兜底：explorer.exe <cwd>
+L4 日志兜底：用 notepad 或指定程序打开日志
+L5 全部失败：返回失败，只记日志
+```
+
+**已知限制**
+
+- 能精确切回**浏览器里已打开的标签页**（配扩展）；不能切到 Windows Terminal 的某个历史标签页（系统无 API）。
+- 窗口标题只能作兜底：重名窗口、程序自行改标题都会影响匹配。
+- 本机没装 Windows Terminal 时 `wt.exe` 不存在，L1 会被跳过；托盘菜单「重新探测终端」可刷新。
+- 后台窗口恢复覆盖隐藏 / 最小化场景（SPEC-020）；点击时延已优化（SPEC-022）；点击后窗口关闭行为见 SPEC-023。
 
 ---
 
-## ⚠️ 已知限制：跳转能做到什么程度
+## 浏览器扩展
 
-这一节请务必读完，它决定了你该怎么配置 `jump`。
+如果只配 `openUrl`，每点一次就会新开一个标签页。Chrome 136 起默认用户数据目录不再允许 `--remote-debugging-port`，所以项目附带一个极小的扩展，用 `chrome.tabs.update` + `chrome.windows.update` 操作你日常浏览器里的真实标签。
 
-### 结论
+安装（约 10 秒）：
 
-| 目标 | 能否 | 靠什么 |
-|---|---|---|
-| 把终端**窗口**带到前台 | ✅ | Win32：先最小化 → 恢复 → `SetForegroundWindow` |
-| 切到**浏览器里已打开的那个标签页** | ✅ | 附带的 Chrome 扩展（见下一节） |
-| 切到 Windows Terminal 的**某个历史标签页** | ❌ | OS 层面无 API |
+1. 打开 `chrome://extensions`
+2. 开启「开发者模式」
+3. 把 [`extension/`](./extension/) **整个文件夹**拖进页面
 
-两点值得展开：
-
-1. **窗口级聚焦必须走「最小化 → 恢复」这个往返**，否则抢不到前台。实测在"窗口正常显示、
-   只是不在前台"时：直接 `SetForegroundWindow` 返回 False；`AppActivate` **返回 True 却什么都没做**。
-   所以本项目的成功判据是 `GetForegroundWindow()` 的**真实结果**，不是任何 API 的返回值。
-2. **最后一条是 Windows Terminal 的限制**：它的命令行只有 `focus-tab`（当前页）和 `new-tab`，
-   没有 `activate tab N`。浏览器那边不同 —— 可以用扩展做到（下一节）。
-
-### 降级链
-
-点击灯带某一行时的尝试顺序如下，任何一级失败都自动降级，**永不抛异常**
-（点一下通知按钮不该让主进程崩）：
-
-配了 `openUrl` 时（Web 界面类任务）：
-
-```
-① 浏览器扩展精确切标签 → ② CDP（可选，需专用调试实例）→ ③ 按窗口标题聚焦 → ④ 新开标签页
-```
-
-没配 `openUrl` 时：显式 `windowProcess` / `windowTitle` 优先匹配对应窗口，跳过自动 WT。只在激活并确认前台 HWND 后报告切换成功；不盲抢其他终端。其余降级路径如下：
-
-```
-L1  spawn 型：直接执行你配的命令（如 wt.exe new-tab -d <cwd>）   ← 首选，最可靠
-L2  窗口级聚焦：先最小化 → 恢复 → SetForegroundWindow            ← 异步等待结果，不阻塞 UI
-L3  目录兜底：explorer.exe <cwd>                                 ← 实测最可靠
-L4  日志兜底：用 notepad（或你指定的程序）打开日志
-L5  全部失败：返回失败，只记日志
-```
-
-### 怎么配才对
-
-想要**打开终端并跳到指定目录**，用 spawn 型而不是 windowTitle 型：
-
-```yaml
-jump:
-  terminal:
-    type: spawn
-    cmd: wt.exe
-    args: ["new-tab", "-d", "D:/your/project"]   # 新开标签页并定位到目录
-  cwd: "D:/your/project"      # L3 兜底用
-```
-
-注意：**本机若没装 Windows Terminal，`wt.exe` 不存在**，此时 L1 会被跳过（应用启动时探测一次并缓存）。托盘菜单里有「重新探测终端」，装了之后点一下即可刷新。
-
-### 其他实测结论
-
-- 窗口标题**只能作兜底**：实测发现重名窗口（如两个「计算器」），且任何程序都能改自己的标题。
-- 无原生模块依赖：全部 Win32 操作通过 PowerShell/COM 完成，因此**不需要 C++ 工具链**，打包失败风险低。
-
----
-
-## 浏览器扩展：精确切回已打开的标签页
-
-点「dsh-web」这类 Web 界面任务时，如果只配 `openUrl`，语义就是"打开这个网址" ——
-于是每点一次多一个标签页。想改成"切回已经开着的那个标签"，需要能操作浏览器标签的能力。
-
-### 为什么不用 Chrome 调试端口
-
-`--remote-debugging-port` + CDP 本来可以精确切标签，但 **Chrome 136 起，默认用户数据目录下
-该端口被静默忽略**（实测 Chrome 139 直接报
-`DevTools remote debugging requires a non-default data directory`）—— 也就是说它只能用在
-"专用调试实例"上，**碰不到你的日常浏览器**。
-
-所以本项目附了一个极小的 Chrome 扩展（[`extension/`](./extension/)），用
-`chrome.tabs.update({active:true})` + `chrome.windows.update({focused:true})` 操作你日常浏览器里
-的真实标签。
-
-### 装一次（约 10 秒）
-
-1. Chrome 地址栏输入 `chrome://extensions`
-2. 右上角开启 **开发者模式**
-3. 把 `extension/` **整个文件夹拖到页面上**（松手即装）；或点「加载已解压的扩展程序」选择该目录
-
-> 拖文件夹与本项目的「加载已解压」等价，是最省事的方式。
-> ⚠️ **拖文件夹、不要拖 `.crx`**：Chrome 要求扩展带 Web Store 来源证明，自打包的 `.crx` 会报
-> `CRX_REQUIRED_PROOF_MISSING`。仓库**不附带** `.crx`；确实需要时用
-> `node scripts/pack-extension.mjs` 自行生成（详见 [`extension/README.md`](./extension/README.md)）。
-
-然后在任务里打开这个开关：
+然后给任务加：
 
 ```yaml
 jump:
   openUrl: http://127.0.0.1:13080
-  openUrlViaExtension: true        # 经扩展切回已打开的标签，而不是新开
+  openUrlViaExtension: true
 ```
 
-### 工作原理
-
-指示灯主进程起一个小 HTTP 服务（只监听 `127.0.0.1:17891`），扩展**长轮询**它：
-
-```
-扩展 --GET /poll------------------> 指示灯     （挂起最多 20s，或直到有指令）
-扩展 <-----------{command:{id,url}}
-扩展  chrome.tabs.update(tabId,{active:true}) + chrome.windows.update({focused:true})
-扩展 --POST /result {id, ok}------> 指示灯     （ok=false => 指示灯退回"新开标签"）
-```
-
-- **按同源匹配**：`http://127.0.0.1:13080/#/whatever` 算同一个页面，完整 URL 不会因路由变化而失配。
-- **至少一次投递**：指令会一直留在待办槽里，直到扩展回报结果。扩展的 MV3 service worker 随时
-  可能被回收 —— 若"投给一条已经断掉的连接就算送达"，这次点击会**静默丢失**（表现为
-  "点了没切成、又新开一个"）。
-- **安全**：只监听 loopback；请求必须带 `x-indicator-extension: 1`。网页想带自定义头会先触发
-  预检，而该服务不返回任何 CORS 头 → 预检必然失败 → 普通网页伪造不了。
-- **没装扩展也不会坏**：检测不到扩展轮询时，点击直接走"新开标签页"，不会白等。
-
-详见 [`extension/README.md`](./extension/README.md)。
+指示灯在 `127.0.0.1:17891` 起一个仅 loopback 的桥接服务，扩展长轮询取指令、回报结果；没装扩展时自动退回「新开标签页」。详见 [`extension/README.md`](./extension/README.md)。
 
 ---
 
-## 开发与打包
+## 目标清单
+
+独立的「目标清单」窗口（SPEC-024 ~ SPEC-027），与 AI 任务状态互不影响：
+
+- **入口**：托盘右键菜单 →「目标清单…」；或任务面板标题栏的目标图标。
+- **悬浮灯**：有进行中目标时，灯带底部显示「目标 N」+ 平均进度环；点击打开目标窗口。
+- **每条目标**：标题（点击可改）、0–100% 手动进度、状态（进行中 / 已完成）。
+- **时间线**：追加「进展 / 问题」记录（带时间、只追加、可删除）；「标记完成」会把进度置 100% 并自动记一条完成记录。
+- **拖拽排序**：拖动卡片左侧把手，在同一分组内上下移动；顺序持久化，导出顺序同步变化。
+- **已完成**：沉到列表底部折叠区，仍可回看与删除。
+- **导出**：右上角「导出」把全部目标与记录写成 Markdown（默认 `goals-YYYY-MM-DD.md`）。
+- **窗口**：560×640、无边框置顶、失焦**不**隐藏；`Esc` / `✕` 只隐藏，下次打开内容还在。
+- **数据**：`%APPDATA%\ai-task-indicator\goals.json`（与 `config.yaml` 分开）；防抖写盘、退出 flush、原子替换；损坏时保留原文件并尝试 `.bak`。
+
+### 开发进展自动同步
+
+AI / 开发者完成一个切片后，不需要手动点 UI：
+
+```bash
+node scripts/goal-sync.mjs --goal "AI信号灯软件开发" --kind progress --text "SPEC-0NN …"
+```
+
+它把一行 JSON 追加到 `goal-inbox.jsonl`，运行中的应用约 1 秒导入为目标时间线的一条记录（未运行则下次启动导入）。`--kind issue` 记为问题；失败行落 `.failed.jsonl`。实现见 [SPEC-027](./docs/specs/027-goal-progress-sync.md)。
+
+![悬浮灯上的目标行](./deliverables/goals-overlay.png)
+
+不做周视图、子任务、提醒、云同步、JSON 导入导出（见 [SPEC-024](./docs/specs/024-goals.md)、[SPEC-025](./docs/specs/025-overlay-goals-row.md)、[SPEC-026](./docs/specs/026-goal-reorder.md)、[SPEC-027](./docs/specs/027-goal-progress-sync.md) 非目标）。
+
+---
+
+## 开发与测试
 
 ```bash
 npm run dev            # 编译 + 启动开发模式
-npm run start:demo     # 用演示配置启动（自动处理 GPU / 环境变量）
-npm start              # 用默认配置启动
-npm run typecheck      # 三份 tsconfig 类型检查（main + renderer + test）
+npm run build          # tsc 编译 main + renderer，并复制静态资源
+npm run typecheck      # 三份 tsconfig：main + renderer + test
 npm test               # 单元测试（vitest）
-npm run smoke          # 端到端冒烟（不开窗口，真实 IO，~2秒）
+npm run smoke          # 无窗口端到端冒烟，真实 IO
+npm run check:ui       # 隐藏 Electron 渲染夹具（布局/主题/长列表）
+npm run check:goals    # 真实 GoalsWindow + preload + IPC + Store 集成
+npm run start:demo     # 演示配置启动
 npm run dist           # 打包 Windows NSIS 安装包
 ```
-
-**技术栈**：Electron + TypeScript，**零UI 框架、零打包器**（渲染层用原生 DOM，构建用 tsc）。生产依赖仅 `electron` + `yaml` 两个。
 
 **目录结构**
 
 ```
 src/
   shared/       类型契约、IPC 契约、常量（主进程与渲染层共用）
-  main/         主进程：托盘、悬浮窗、面板、状态仓库、通知、跳转
+  main/         主进程：托盘、悬浮窗、面板、状态仓库、通知、跳转、目标清单
     monitors/   六种监控器 + 规则引擎
   preload/      contextBridge 白名单
-  renderer/     悬浮灯 + 任务面板（classic script，无 import）
+  renderer/     悬浮灯 / 任务面板 / 目标窗口（classic script，无 import）
 test/           单元测试
-poc/            Windows API 实测脚本（POC 报告的证据）
-docs/           PRD、架构设计、POC 报告
+scripts/        启动、冒烟、UI 夹具、目标同步 CLI
+docs/           开发流程、规格、验证记录
+extension/      精确切标签的 Chrome 扩展
 ```
 
+### specTDD 开发流程
+
+迭代遵循 **规格 → 失败测试（Red）→ 最小实现（Green）→ 重构（Refactor）→ 回归与真机验收**：
+
+- 从[文档入口](./docs/README.md)和[开发流程](./docs/development/spec-tdd.md)开始；
+- 用[规格模板](./docs/specs/_template.md)建立变更、登记到[迭代索引](./docs/specs/README.md)；
+- 按[测试与验收规范](./docs/development/testing.md)执行；人与 AI 都遵循 [AGENTS.md](./AGENTS.md)；
+- 历史失败与接管基线见[验证记录](./docs/development/baseline-validation.md)与 [000-baseline](./docs/specs/000-baseline.md)。
+
+当前流程靠文档约定与评审执行，尚未配置 CI 门禁；仓库也暂未提交 lockfile。
+
+### 当前验证快照
+
+截至 2026-10-22（Windows 10/11、Node 24、Electron 33）：
+
+| 检查 | 结果 |
+|---|---|
+| `npm run typecheck` | 通过 |
+| `npm test -- --maxWorkers=2 --minWorkers=1` | **64 files / 928 tests passed** |
+| `npm run build` | 通过 |
+| `npm run smoke` | 22 项断言全部通过 |
+| `npm run check:ui` | 31 个真实 Electron 渲染场景 PASS |
+| `npm run check:goals` | 目标窗口真实 IPC 集成 PASS |
+| Windows 真机 | 目标窗口、悬浮灯目标行、拖拽排序均经用户确认；SPEC-002 的三工具并行矩阵仍为 `verifying` |
+
+测试数量是当次快照，不代表历史版本。
+
 ---
 
-## specTDD 开发流程
+## 验证与已知限制
 
-后续迭代遵循 **规格 → 失败测试（Red）→ 最小实现（Green）→ 重构（Refactor）→ 回归与验收**。每次变更先建立可验收规格，记录验收条件与测试的对应关系，再修改行为；纯文档等例外须说明适用理由。
+**想确认它真的在工作**，按顺序试：
 
-- 从[文档入口](./docs/README.md)和[开发流程](./docs/development/spec-tdd.md)开始。
-- 用[规格模板](./docs/specs/_template.md)建立本轮规格，登记到[迭代索引](./docs/specs/README.md)。
-- 按[测试与验收规范](./docs/development/testing.md)执行；人工和 AI 同时遵循 [AGENTS.md](./AGENTS.md)。
-- 接管时的历史失败见[基线记录](./docs/development/baseline-validation.md)；本轮收敛结果与测试证据见 [SPEC-002](./docs/specs/002-three-tool-reliability.md)。Windows 桌面效果需独立验收。
+1. 跑一个会写日志的任务，让日志出现 `error`，灯应变红；
+2. 任务失败时应有弹窗 + 提示音（可分别关闭）；
+3. 用 `remote-agent` 的 curl 发 `running` → `failed`，观察灯与通知；
+4. 配一个 process 型任务指向临时进程（如 `ping -t`），关掉它，`graceMs` 后应变红；
+5. 让日志高频输出 `error`，确认 30 秒内只通知一次并显示 `×N`；
+6. 打开目标窗口，加一条目标、拉进度、记一条进展、拖拽排序、导出 Markdown；
+7. 运行 `goal-sync` 写一条进展，确认目标时间线约 1 秒内出现。
 
-当前流程通过文档约定和评审执行，尚未配置自动 CI 门禁。
+**已知限制**
 
-## 验证步骤
-
-想确认它真的在工作，按这个顺序试：
-
-1. **看灯变色**：跑一个会输出日志的任务（方式二），日志里出现 `error` 字样时，灯应变红。
-2. **看通知**：任务失败时应弹窗 + 响提示音。可在配置里关掉其中之一：`notify.popup: false` / `notify.sound: false`。
-3. **测 webhook**（最容易验证）：启用示例三的 `remote-agent` 任务，用上面的 curl 发 `running` 再发 `failed`，观察灯和通知。
-4. **故意让进程崩溃**：配一个 process 型任务指向临时进程（如 `ping -t`），然后关掉它，灯应在 `graceMs` 后变红。
-5. **验证去重**：让日志高频输出 `error`，同一任务 30s 内只应通知一次，通知里显示 `×N` 累计次数。
-
----
-
-## 设计出处
-
-本项目**未fork 任何外部项目**。GitHub 上检索到的 26 个候选项目经 `api.github.com` 实时核验后确认无一同时满足「Windows + 托盘 + 悬浮灯 + 多任务 + 三类监控」，故从零实现，托盘/置顶/通知直接使用 Electron 官方 API。
-
-以下三个 MIT 项目的设计思路被借鉴（详见 `docs/01-PRD.md` 第 8 节）：
-
-- [`accessd/tmux-agent-indicator`](https://github.com/accessd/tmux-agent-indicator) —— hook 驱动的事件→状态映射
-- [`ru-gong/agent-beacon`](https://github.com/ru-gong/agent-beacon) —— 状态 JSON 文件协议
-- [`carlbuu/ai-status-light-esp32`](https://github.com/carlbuu/ai-status-light-esp32) —— 状态优先级与多任务表达
+- 不能切到 Windows Terminal 的某个历史标签页（系统无 API）；浏览器标签可以靠扩展切。
+- 窗口标题匹配只是兜底；重名窗口会影响结果。
+- 托盘/悬浮灯/通知/焦点/DPI/多屏等桌面行为必须 Windows 真机验收，单元测试不能替代。
+- 目标数据损坏时会隔离原文件并尝试 `.bak`，仍可能丢失最近一次未落盘的改动（防抖窗口内崩溃）。
+- 目标窗口位置不持久化；收件箱失败行只写 `.failed.jsonl`，没有 UI 查看。
 
 ---
 
 ## 文档
 
 | 文件 | 内容 |
-|------|------|
-| **[`docs/README.md`](./docs/README.md)** | **当前开发入口** —— specTDD 流程、规格索引、基线和历史资料导航 |
-| **[`docs/specs/000-baseline.md`](./docs/specs/000-baseline.md)** | **当前工程基线** —— 五类监控、关键约束、代码与测试映射 |
-| [`docs/design-decisions.md`](./docs/design-decisions.md) | 历史决策台账 —— 设计选择与踩坑记录 |
-| [`docs/04-SPEC.md`](./docs/04-SPEC.md) | 早期需求规格快照，部分状态已过时 |
-| [`docs/05-NEXT-PROMPT.md`](./docs/05-NEXT-PROMPT.md) | 按 specTDD 执行后续任务的通用提示词 |
-| [`docs/01-PRD.md`](./docs/01-PRD.md) | 产品需求、竞品选型结论、配置 schema |
-| [`docs/02-ARCHITECTURE.md`](./docs/02-ARCHITECTURE.md) | 架构设计、任务分解、类型契约 |
-| [`docs/03-POC-REPORT.md`](./docs/03-POC-REPORT.md) | Windows API 实测报告（含本 README「已知限制」的证据） |
-| [`docs/round*.md`](./docs/) | 历史逐轮开发记录：每轮修复与当次实测结论 |
+|---|---|
+| [docs/README.md](./docs/README.md) | **开发入口**：流程、规格索引、基线、历史资料 |
+| [docs/development/spec-tdd.md](./docs/development/spec-tdd.md) | specTDD 阶段、关卡、完成门槛 |
+| [docs/development/testing.md](./docs/development/testing.md) | 测试分层、命令、Windows/云端边界 |
+| [docs/development/desktop-validation.md](./docs/development/desktop-validation.md) | 三工具桌面验收清单与边界 |
+| [docs/development/codex-approval-hooks.md](./docs/development/codex-approval-hooks.md) | Codex 审批黄灯 Hook |
+| [docs/specs/README.md](./docs/specs/README.md) | 规格与迭代索引 |
+| [docs/specs/000-baseline.md](./docs/specs/000-baseline.md) | 当前工程基线、不变量、代码/测试入口 |
+| [docs/specs/024-goals.md](./docs/specs/024-goals.md) ~ [027](./docs/specs/027-goal-progress-sync.md) | 目标清单、悬浮灯目标行、拖拽排序、进展同步 |
+| [docs/research/](./docs/research/) | 目标功能开源先例调研与 UI 对照图 |
+| [docs/design-decisions.md](./docs/design-decisions.md) | 历史决策台账（外部同步副本） |
 
-> **历史台账 `design-decisions.md` 与 `round*.md` 是同步副本**，原编辑位置为仓库外 `../docs`，由 `node scripts/sync-docs.mjs` 同步、脱敏和校验；普通 clone 无需运行此脚本。
-> 新 specTDD 流程、`docs/specs/` 和交接提示词直接在本仓库维护，不受该同步脚本覆盖。
+> `design-decisions.md` 与 `round*.md` 是仓库外 `../docs` 的同步副本；新流程、规格和验证记录直接在本仓库维护。
+
+---
+
+## 设计出处
+
+本项目**未 fork 任何外部项目**。AI 监控方向最初检索了 26 个候选（见 [`docs/01-PRD.md`](./docs/01-PRD.md) 第 8 节），没有同时满足「Windows + 托盘 + 悬浮灯 + 多任务 + 多监控方式」的现成项目；托盘、置顶、通知直接使用 Electron 官方 API。
+
+借鉴过的设计（均 MIT）：
+
+- [`accessd/tmux-agent-indicator`](https://github.com/accessd/tmux-agent-indicator) —— hook 驱动的事件 → 状态映射
+- [`ru-gong/agent-beacon`](https://github.com/ru-gong/agent-beacon) —— 状态 JSON 文件协议
+- [`carlbuu/ai-status-light-esp32`](https://github.com/carlbuu/ai-status-light-esp32) —— 状态优先级与多任务表达
+
+目标清单方向另做了开源调研（见 [`docs/research/`](./docs/research/)）：TodoPop 的菜单栏交互、DeskTodo 的 Windows 托盘小窗工程细节、TO-DO-Panel 的 Electron 分层、todo.txt 的纯文本模型；只借鉴交互与可靠性做法，不复制代码。
 
 ## License
 
