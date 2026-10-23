@@ -1,6 +1,6 @@
 # SPEC-030：sqlite 监控的长回合活信号与等待态（WorkBuddy 运行中不亮灯）
 
-> 状态：verifying
+> 状态：done
 > 类型：bugfix（状态判定）
 > 需求来源：用户 2026-10-22 17:44 会话——「现在 workbuddy 明明有在运行为啥没灯」。
 > 负责人：lead（根因调查：workbuddy-probe）
@@ -96,8 +96,8 @@
 | AC-01、AC-02、AC-04 | `test/sqlite-monitor.test.ts`：`updated_at 新鲜但 last_activity_at 陈旧 -> 仍算活跃（长回合不再误判灰）`、`last_activity_at 为 NULL 时也能用 updated_at 兜底`、`两者都陈旧 -> 不活跃（20 小时遗留 working 仍不能亮蓝）`、`completed 的水位不受活动窗口影响（仍然亮绿到点击）` | 2026-10-22 18:05 `npm test -- test/sqlite-monitor.test.ts` exit 1：3 failed / 35 passed；前两条 `expected +0 to be 1`（`freshActiveCount` 仍是 0，证明只看了 `last_activity_at`） | 18:06 同命令 exit 0：38 passed（真实 SQLite 临时库 + 系统 node） | 真实 SQLite（临时库，不碰用户库） |
 | AC-03 | 同上：`pending 计入等待态（默认 waiting 名单已含 pending）` | 同上：`freshWaitingCount` `expected +0 to be 1` | 18:06 通过：`freshWaitingCount === 1`，判 `waiting` | 同上 |
 | AC-05 | `npm run typecheck`、`npm test -- --maxWorkers=2 --minWorkers=1`、`npm run build`、`npm run smoke` | — | 18:08：typecheck 0；65 files / 937 tests passed；build 0；smoke 0；`git diff --check` 0 | Windows 本机 |
-| AC-06 | 真机：WorkBuddy 长回合 + 权限确认，观察灯色（建议配合 `--remote-debugging-port` 采样 data-status） | 用户 2026-10-22 17:44 现场（运行中灰灯）+ 读库/WorkBuddy 日志证据 | 待用户确认 | 真实 WorkBuddy |
-| AC-07 | 本机 `config.local.yaml` 已带 `activeWithinMs: 600000` 与 `pending`；应用热重载后配置校验无告警 | — | 待真机重启后确认（代码改动需重启指示灯才生效） | Windows 本机 |
+| AC-06 | 真机：WorkBuddy 长回合 + 权限确认，观察灯色（建议配合 `--remote-debugging-port` 采样 data-status） | 用户 2026-10-22 17:44 现场（运行中灰灯）+ 读库/WorkBuddy 日志证据 | 2026-10-23 用户真机确认「SPEC-030 看着也没问题了」 | 真实 WorkBuddy |
+| AC-07 | 本机 `config.local.yaml` 已带 `activeWithinMs: 600000` 与 `pending`；应用热重载后配置校验无告警 | — | 2026-10-23 用户重启指示灯后确认无异常（配置于 2026-10-22 18:06:43 热重载，代码改动随重启生效） | Windows 本机 |
 
 ## 6. 执行记录
 
@@ -115,9 +115,9 @@
 
 ## 7. 交付与验收
 
-- [x] AC-01 ~ AC-05 有真实 SQLite 临时库用例与全量回归证据；AC-07 本机配置已同步；AC-06 真机待用户确认。
+- [x] AC-01 ~ AC-05 有真实 SQLite 临时库用例与全量回归证据；AC-07 本机配置已同步；AC-06 已于 2026-10-23 用户真机确认。
 - [x] 类型检查、全量测试、构建后 smoke 及相关集成检查结果已记录（见执行记录）。
 - [x] 配置示例、规格索引已更新；本机 `config.local.yaml` 只做本地同步，不提交。
-- [ ] AC-06 真机确认后改 `done`；当前保持 `verifying`，未提交（用户未要求提交）。
+- [x] 残留风险（>10 分钟完全无状态写入的极端回合、闸门 CIM 成本、可观测性缺口）已记录，不阻塞本规格；无遗留失败、无跳过或删除断言。
 
-最终结果/提交引用：代码在工作区（`src/main/monitors/sqlite.ts`、`test/sqlite-monitor.test.ts`、两个配置示例、本机 `config.local.yaml`、规格与索引），未提交。代码改动需重启指示灯生效；待真机确认长回合蓝灯/权限黄灯后改为 `done`。
+最终结果/提交引用：已随提交 `9290ee1`（「fix: SPEC-028/029/030 …」）推送 `origin/main`；2026-10-23 用户确认「SPEC-030 看着也没问题了」。回退方式是还原 `sqlite.ts` 的 `MAX(COALESCE(...))` 新鲜度表达式、`DEFAULT_ACTIVE_WITHIN_MS` 与 waiting 默认名单，并重启指示灯。
