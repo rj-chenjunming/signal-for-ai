@@ -1,6 +1,6 @@
 # SPEC-029：点击 web 任务时恢复最小化的浏览器窗口
 
-> 状态：verifying
+> 状态：done
 > 类型：bugfix（交互/窗口恢复）
 > 需求来源：用户 2026-10-22 17:55 会话——「有时候我点击 dsh web 图标，不会自动打开窗口，底下图标会亮就是了大概这样的」，附任务栏截图（Chrome 任务栏按钮高亮、无窗口）。
 > 负责人：lead
@@ -97,7 +97,7 @@ if (typeof tab.windowId === 'number') {
 | AC | 测试文件/完整用例名或真机步骤 | Red 证据 | Green 证据 | 回归/平台验收 |
 | --- | --- | --- | --- | --- |
 | AC-01、AC-02、AC-03、AC-04 | `test/extension-bridge-client.test.ts`：`最小化窗口：先激活标签，再带 state:normal 聚焦，确保窗口被还原`、`正常窗口：只聚焦，不改变窗口状态（不能把最大化/全屏窗口重置）`、`windows.get 抛错：不中断切标签，仍尝试聚焦`、`没有同源标签：不碰标签/窗口 API，返回 found:false（交给主进程降级）` | 2026-10-22 17:58 `npm test -- test/extension-bridge-client.test.ts` exit 1：1 failed / 3 passed；`expected "spy" to be called with arguments: [7, {focused:true, state:'normal'}]`，实际只收到 `{focused:true}`（缺 `state`） | 17:59 同命令 exit 0：4 passed；`npm run typecheck` exit 0（含 `allowJs` 后的测试程序） | 纯逻辑（假 chrome 对象） |
-| AC-05 | Windows 真机：`chrome://extensions` 重载扩展（版本应为 1.1.2）→ 最小化 Chrome → 点 dsh-web 行 | 用户 2026-10-22 17:55 截图 + 日志（扩展回报成功但窗口仍 `Minimized=True`） | 待用户确认 | 真实 Chrome + 指示灯 |
+| AC-05 | Windows 真机：`chrome://extensions` 重载扩展（版本应为 1.1.2）→ 最小化 Chrome → 点 dsh-web 行 | 用户 2026-10-22 17:55 截图 + 日志（扩展回报成功但窗口仍 `Minimized=True`） | 2026-10-23 用户重载扩展后真机确认可以收尾（回复「2和3可以改为done了」，即本条与 SPEC-028 的 AC） | 真实 Chrome + 指示灯 |
 | AC-06 | `npm run typecheck`、`npm test -- --maxWorkers=2 --minWorkers=1`、`npm run build`、`npm run smoke` | — | 18:00–18:01：typecheck 0；65 files / 932 tests passed；build 0；smoke 0；`git diff --check` 0 | Windows 本机 |
 
 ## 6. 执行记录
@@ -115,9 +115,9 @@ if (typeof tab.windowId === 'number') {
 
 ## 7. 交付与验收
 
-- [x] AC-01 ~ AC-04 有单测证据；AC-06 的类型检查/全量测试/构建/smoke 已记录；AC-05 真机待用户确认。
+- [x] AC-01 ~ AC-04 有单测证据；AC-06 的类型检查/全量测试/构建/smoke 已记录；AC-05 已于 2026-10-23 用户真机确认。
 - [x] 类型检查、全量测试、构建后 smoke 及相关集成检查结果已记录（见执行记录）。
 - [x] 扩展 README、规格索引已更新；没有秘密或本机配置进入提交。
-- [ ] AC-05 Windows 真机确认后改 `done`；当前保持 `verifying`，未提交（用户未要求提交）。
+- [x] 无遗留失败、无跳过或删除断言；真机项已关闭。
 
-最终结果/提交引用：代码在工作区（`extension/bridge-client.js`、`extension/manifest.json`、`test/extension-bridge-client.test.ts`、`tsconfig.test.json`、扩展 README、规格与索引），未提交。待用户重载扩展并确认最小化窗口能恢复后改为 `done`。
+最终结果/提交引用：已随提交 `9290ee1`（「fix: SPEC-028/029/030 …」）推送 `origin/main`；2026-10-23 用户确认（回复「2和3可以改为done了」）。回退方式是还原 `extension/bridge-client.js` 的 `windows.get`/`state:'normal'` 段落并重载扩展。

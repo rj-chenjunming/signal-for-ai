@@ -1,6 +1,6 @@
 # SPEC-028：悬浮灯「目标」行去掉框线痕迹（分隔线弯钩 + 常驻滚动条）
 
-> 状态：verifying
+> 状态：done
 > 类型：bugfix（视觉）
 > 需求来源：用户 2026-10-22 会话——「感觉目标这个图标有点问题，能看到轮廓，没有很好的融入背景」；用户附贴边点阵局部截图，并确认所指即「目标行上方带弯钩的圆角分隔线 + 右侧 4px 灰色滚动条」把图标框了起来。
 > 负责人：lead
@@ -93,7 +93,7 @@ SPEC-025 给悬浮灯加了「目标」行，样式为：
 | AC-01、AC-03、AC-04 | `npm run check:ui`：贴边 `left` 夹具（`checkOverlay(3,'left',{active:2,done:1,progress:40})`，3 任务 + 目标行） | 2026-10-22 17:26 `npm run check:ui` exit 1：`AssertionError: stray scrollbar beside the goal row (x gutter)`，实际 4 !== 0（`.strip-rows` `clientWidth 28 / offsetWidth 32`、`scrollHeight 108 / clientHeight 106`） | 17:29 同命令 exit 0（31 cases）；加入横排夹具后 17:37 exit 0（`PASS: 32 real Electron rendering cases`）。贴边截图 `logs/spec012-ui/overlay-goals-left-3.png` 无滚动条、目标行 32px、进度环/文字按贴边规则隐藏 | 隐藏 Electron 渲染（非 OS 鼠标/DPI 验收） |
 | AC-02、AC-03、AC-05 | `npm run check:ui`：非贴边目标行（3 任务 + 目标、0 任务 + 目标）与无目标行的 4 布局 × 4 任务数用例 | 2026-10-22 17:25 首跑 exit 1：`AssertionError: goal row must not paint a rounded border-top hook`，实际 `'1px' !== '0px'`（当时顺序为非贴边夹具先跑） | 17:29 exit 0：计算样式 `border-top-width: 0px`、`::before` 高度 1px、行高 32；截图 `overlay-goals-3.png`、`overlay-goals-0.png`、`overlay-goals-left-3.png` | 隐藏 Electron 渲染 |
 | AC-06 | `npm run typecheck`、`npm test -- --maxWorkers=2 --minWorkers=1`、`npm run build`、`npm run smoke`、`npm run check:goals`、`git diff --check` | — | 见执行记录，全部 exit 0 | Windows 本机 |
-| AC-07 | Windows 真机：贴边点阵 + 有进行中目标，用户查看目标行附近 | 修改前用户截图：目标行上方弯钩分隔线 + 右侧 4px 灰色滚动条 | 待用户确认（截图见 `deliverables/dock-vertical.png` 与 `logs/spec012-ui/overlay-goals-left-3.png`） | 用户确认 |
+| AC-07 | Windows 真机：贴边点阵 + 有进行中目标，用户查看目标行附近 | 修改前用户截图：目标行上方弯钩分隔线 + 右侧 4px 灰色滚动条 | 2026-10-23 用户真机确认可以收尾（回复「2和3可以改为done了」，即本条与 SPEC-029 的 AC）；截图见 `deliverables/dock-vertical.png` 与 `logs/spec012-ui/overlay-goals-left-3.png` | 用户确认 |
 | AC-08 | `npm run check:ui`：顶部横排夹具（`checkOverlay(3,'top',{...})`） | 2026-10-22 17:36 `npm run check:ui` exit 1：`AssertionError: docked-top goal row needs a vertical divider`，实际 `'24px' !== '1px'` | 17:37 exit 0：计算宽度 1px、高度 24px（`top/bottom: 4px`）、行高 32、无滚动条；截图 `logs/spec012-ui/overlay-goals-top-3.png` | 隐藏 Electron 渲染 |
 
 ## 6. 执行记录
@@ -113,9 +113,9 @@ SPEC-025 给悬浮灯加了「目标」行，样式为：
 
 ## 7. 交付与验收
 
-- [x] 渲染层 AC-01 ~ AC-05、AC-08 有真实 Electron 夹具断言与截图证据；AC-06 的类型检查/全量测试/构建/smoke/check:goals 已记录；AC-07 真机待用户确认。
+- [x] 渲染层 AC-01 ~ AC-05、AC-08 有真实 Electron 夹具断言与截图证据；AC-06 的类型检查/全量测试/构建/smoke/check:goals 已记录；AC-07 已于 2026-10-23 用户真机确认。
 - [x] 类型检查、全量测试、构建后 smoke 及相关集成检查结果已记录（见执行记录）。
 - [x] 规格索引、README 截图已更新；没有秘密或本机配置进入提交。
-- [ ] AC-07 Windows 真机确认后改 `done`；当前保持 `verifying`，未提交（用户未要求提交）。
+- [x] 无遗留失败、无跳过或删除断言；真机项已关闭。
 
-最终结果/提交引用：代码在工作区（`src/renderer/shared.css`、`scripts/ui-render-check.cjs`、`deliverables/*`、规格与索引），未提交。待用户真机确认贴边点阵下目标行不再被框住后改为 `done`。
+最终结果/提交引用：已随提交 `9290ee1`（「fix: SPEC-028/029/030 …」）推送 `origin/main`；2026-10-23 用户确认（回复「2和3可以改为done了」）。回退方式是还原 `src/renderer/shared.css` 的 `.strip-goal-row::before` 与 `border-top/margin-top` 段落。
