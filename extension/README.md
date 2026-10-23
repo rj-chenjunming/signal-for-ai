@@ -133,12 +133,16 @@ background.js（SW）  ── onStartup / onInstalled / chrome.alarms(30s) ─�
 扩展  --GET /poll------------------->  指示灯     （挂起最多 20s，或直到有指令）
 扩展  <----------------{command:{id,url}}
 扩展  执行 chrome.tabs.update(tabId,{active:true})
-      +  chrome.windows.update(windowId,{focused:true})
+      +  chrome.windows.update(windowId,{focused:true})                  （窗口本来就没最小化）
+      +  chrome.windows.update(windowId,{focused:true,state:'normal'})   （窗口最小化时先还原）
 扩展  --POST /result {id, ok}-------->  指示灯      （ok=false => 指示灯退回"新开"）
 扩展  --POST /status {版本/唤醒/定时器/轮询位置}--> 指示灯   （只写日志，不参与判定）
 ```
 
 - **按同源匹配**：`http://127.0.0.1:13080/#/whatever` 也命中同一个 `13080` 页面。
+- **最小化窗口会被还原（1.1.2 起，SPEC-029）**：`chrome.windows.update({focused:true})` 只聚焦、
+  不改变窗口状态 —— 窗口最小化时只是任务栏按钮亮起来，窗口并不会出现。所以扩展先 `windows.get`
+  读状态，`minimized` 时显式带 `state:'normal'`；`maximized`/`fullscreen` 则保持原样，不会把窗口重置。
 - **`x-indicator-extension: 1` 头**：指示灯据此确认请求来自扩展；网页想带自定义头会先触发预检，而桥接不返回任何 CORS 头 → 预检失败 → 挡掉（防 CSRF）。
 - **权限最小化**：`tabs`、`alarms` 与 `http://127.0.0.1/*`，不接触任何外部网站。
 
@@ -148,6 +152,12 @@ background.js（SW）  ── onStartup / onInstalled / chrome.alarms(30s) ─�
 2. `chrome://extensions` 里本扩展是否**已启用**、有没有红色报错；改过代码后必须点「重新加载」。
 3. 想知道是不是"命中了但没找到标签"：日志会先出现 `浏览器扩展未确认切换`，随后才是 `已打开 …`。
    这种情况通常是目标页没开，或者开在了**另一个浏览器/另一个 Chrome 配置**里。
+
+## 排查「点了只有任务栏图标亮、窗口没出现」
+
+- 确认扩展版本是 **1.1.2 或更高**：日志里 `扩展自报：版本=1.1.2 …`；旧版只聚焦不还原最小化窗口。
+- 窗口在**另一个虚拟桌面**上时，Windows 不会因为聚焦就切桌面 —— 这是 OEM 行为，扩展与指示灯都改不了。
+- 扩展没在跑时点击会退回"新开页面"；那种情况下 Chrome 本体被最小化也不会自动还原（本轮只修扩展链路）。
 
 
 ---

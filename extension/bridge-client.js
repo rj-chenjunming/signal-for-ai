@@ -96,8 +96,23 @@ export async function activateByUrl(url, chromeApi = globalThis.chrome) {
   const tab = hits.find((t) => t.active === true) ?? hits[0];
   await chromeApi.tabs.update(tab.id, { active: true });
   if (typeof tab.windowId === 'number') {
+    // 【SPEC-029】`focused: true` 只聚焦，不改变窗口状态：窗口最小化时
+    // 这等价于 Windows 的 SetForegroundWindow —— 任务栏图标亮了，窗口仍是
+    // minimized（用户 2026-10-22 反馈"点了 dsh-web 只有底下图标会亮"）。
+    // 所以先读一次状态，最小化时显式带 state:'normal' 还原；
+    // 其它状态（maximized/fullscreen）保持原样，避免把最大化/全屏窗口重置。
+    let windowState;
     try {
-      await chromeApi.windows.update(tab.windowId, { focused: true });
+      windowState = (await chromeApi.windows.get(tab.windowId))?.state;
+    } catch {
+      /* 窗口可能刚被关掉；按"不改变状态"处理，仍尝试聚焦 */
+    }
+    const update = { focused: true };
+    if (windowState === 'minimized') {
+      update.state = 'normal';
+    }
+    try {
+      await chromeApi.windows.update(tab.windowId, update);
     } catch {
       /* 窗口可能刚被关掉，忽略 */
     }

@@ -48,9 +48,11 @@ tasks:
       database: D:/your-appdata/.workbuddy/workbuddy.db
       activeStatus: working
       completedStatus: completed
-      waitingStatuses: [waiting, awaiting_approval, needs_input]
+      waitingStatuses: [pending, waiting, awaiting_approval, needs_input]
       failedStatuses: [failed, error]
-      activeWithinMs: 120000
+      # SPEC-030：长工具执行期间 last_activity_at 不推进，窗口要按"分钟级"给足；
+      # 判定同时参考 updated_at（回合/权限/完成都会刷新它）。
+      activeWithinMs: 600000
       intervalMs: 5000
       maxFailures: 3
       notifyOnDone: true

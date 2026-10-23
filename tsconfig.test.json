@@ -18,7 +18,10 @@
     // 测试里允许用as const 等断言辅助类型，但禁止 never 逃逸：
     // 这里通过 lint 注释提醒，实际靠 code review 保证。
     "noUnusedLocals": true,
-    "noUnusedParameters": true
+    "noUnusedParameters": true,
+    // SPEC-029：扩展侧（extension/*.js）是普通 ESM，直接 import 进测试才能锁住
+    // 「最小化窗口要还原」这类只在浏览器里发生的行为；allowJs 让 tsc 能解析它。
+    "allowJs": true
   },
   "include": ["test/**/*.ts", "src/**/*.ts"],
   "exclude": ["node_modules", "dist", "dist-renderer"]

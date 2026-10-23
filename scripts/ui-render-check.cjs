@@ -85,14 +85,25 @@ async function checkOverlay(count, dock, goalsSummary = null) {
         const row = document.querySelector('.strip-goal-row');
         if (!row) return null;
         const ring = row.querySelector('.strip-goal-ring');
+        const separator = getComputedStyle(row, '::before');
         return {
           label: row.querySelector('.strip-port')?.textContent ?? null,
           icon: !!row.querySelector('svg'),
           progress: ring ? getComputedStyle(ring).getPropertyValue('--goal-progress').trim() : null,
           ringVisible: ring ? getComputedStyle(ring).display !== 'none' : false,
+          height: row.offsetHeight,
+          borderTopWidth: getComputedStyle(row).borderTopWidth,
+          separator: { content: separator.content, width: separator.width, height: separator.height, background: separator.backgroundColor },
         };
       })();
-      return {stripHidden:strip.hidden,coreHidden:core.hidden,bodyWidth:document.body.scrollWidth,bodyHeight:document.body.scrollHeight,points,goal,last:last&&rect(last),viewport:rect(rows),width:innerWidth,height:innerHeight,toastHeight:toast.offsetHeight,toastWrap:getComputedStyle(toast).whiteSpace};
+      const rowsScroll = {
+        scrollHeight: rows.scrollHeight, clientHeight: rows.clientHeight,
+        scrollWidth: rows.scrollWidth, clientWidth: rows.clientWidth,
+        // 滚动条会吃掉 clientWidth/clientHeight；为 0 才说明没有常驻滚动条。
+        gutterX: rows.offsetWidth - rows.clientWidth,
+        gutterY: rows.offsetHeight - rows.clientHeight,
+      };
+      return {stripHidden:strip.hidden,coreHidden:core.hidden,bodyWidth:document.body.scrollWidth,bodyHeight:document.body.scrollHeight,points,goal,rowsScroll,last:last&&rect(last),viewport:rect(rows),width:innerWidth,height:innerHeight,toastHeight:toast.offsetHeight,toastWrap:getComputedStyle(toast).whiteSpace};
     })()`);
     assert.equal(value.stripHidden, !forceStrip); assert.equal(value.coreHidden, forceStrip);
     assert.equal(value.toastWrap, 'nowrap'); assert.ok(value.toastHeight <= 36, 'narrow toast became vertical text');
@@ -107,6 +118,25 @@ async function checkOverlay(count, dock, goalsSummary = null) {
       assert.equal(value.goal.label, `目标 ${goalsSummary.active}`);
       assert.equal(value.goal.progress, String(goalsSummary.progress));
       assert.equal(value.goal.ringVisible, dock === 'none', 'progress ring should hide in docked dot mode');
+      // SPEC-028：目标行必须落在 32px 行节奏内，不能把滚动容器撑出溢出/常驻滚动条。
+      assert.equal(value.rowsScroll.gutterX, 0, 'stray scrollbar beside the goal row (x gutter)');
+      assert.equal(value.rowsScroll.gutterY, 0, 'stray scrollbar beside the goal row (y gutter)');
+      assert.ok(value.rowsScroll.scrollHeight <= value.rowsScroll.clientHeight, 'goal row overflows the rows container vertically');
+      assert.ok(value.rowsScroll.scrollWidth <= value.rowsScroll.clientWidth, 'goal row overflows the rows container horizontally');
+      assert.equal(value.goal.height, 32, 'goal row must keep the 32px row rhythm');
+      // SPEC-028：分隔线是直线且不占布局高度（border-top 会在 8px 圆角上画出弯钩）。
+      // SPEC-028：分隔线是直线且不占布局高度（border-top 会在 8px 圆角上画出弯钩）。
+      // 顶部横排点阵的行是横向排列的，分隔线必须竖着画；其余形态是横线。
+      if (dock === 'top') {
+        assert.equal(value.goal.separator.width, '1px', 'docked-top goal row needs a vertical divider');
+        assert.ok(parseFloat(value.goal.separator.height) >= 16, 'docked-top divider must span most of the row height');
+      } else {
+        assert.equal(value.goal.separator.height, '1px', 'goal row separator must be a 1px line');
+        assert.ok(parseFloat(value.goal.separator.width) >= 16, 'goal row divider must span most of the row width');
+      }
+      assert.equal(value.goal.borderTopWidth, '0px', 'goal row must not paint a rounded border-top hook');
+      assert.equal(value.goal.separator.content, '""', 'goal row separator missing');
+      assert.notEqual(value.goal.separator.background, 'rgba(0, 0, 0, 0)', 'goal row separator must be visible');
       const before = goalsOpened;
       await win.webContents.executeJavaScript(`document.querySelector('.strip-goal-row').click()`);
       await new Promise(resolve => setTimeout(resolve, 50));
@@ -120,6 +150,8 @@ async function checkOverlay(count, dock, goalsSummary = null) {
     }
     if (count === 3 && !goalsSummary) writeFileSync(path.join(out, `overlay-${dock}.png`), (await win.webContents.capturePage()).toPNG());
     if (goalsSummary && dock === 'none') writeFileSync(path.join(out, `overlay-goals-${count}.png`), (await win.webContents.capturePage()).toPNG());
+    // SPEC-028：贴边点阵的目标行必须留一张截图，作为「框线/滚动条」回归的目视证据。
+    if (goalsSummary && dock !== 'none') writeFileSync(path.join(out, `overlay-goals-${dock}-${count}.png`), (await win.webContents.capturePage()).toPNG());
     results.push({ role: 'overlay', count, dock, goals: goalsSummary !== null, ok: true });
   } finally { win.destroy(); }
 }
@@ -226,9 +258,12 @@ async function checkGoals(theme, empty = false) {
 app.whenReady().then(async () => {
   for (const dock of ['none', 'left', 'right', 'top']) for (const count of [0, 1, 3, 20]) await checkOverlay(count, dock);
   // SPEC-025：目标行（含 0 任务仅目标、以及正常任务数 + 目标行）。
+  // SPEC-028：贴边点阵的目标行放最前——用户报的就是这个形态（分隔线弯钩 + 常驻滚动条），
+  // 一旦回归，失败点应该直接落在这个夹具上。
+  await checkOverlay(3, 'left', { active: 2, done: 1, progress: 40 });
+  await checkOverlay(3, 'top', { active: 2, done: 1, progress: 40 });
   await checkOverlay(3, 'none', { active: 2, done: 1, progress: 40 });
   await checkOverlay(0, 'none', { active: 1, done: 0, progress: 60 });
-  await checkOverlay(3, 'left', { active: 2, done: 1, progress: 40 });
   for (const theme of ['light', 'dark']) { await checkPanel(theme, 7); await checkPanel(theme, 0); await checkPanel(theme, 3, true); }
   for (const theme of ['light', 'dark']) await checkPanel(theme, 3, false, '未找到 dsh 主窗口，请先打开工具后重试。<b>普通文字</b>：C:/example/very-long-path/'.repeat(4));
   for (const theme of ['light', 'dark']) { await checkGoals(theme); await checkGoals(theme, true); }

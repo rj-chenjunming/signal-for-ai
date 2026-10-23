@@ -110,7 +110,9 @@ tasks:
       type: sqlite
       database: D:/your-appdata/.workbuddy/workbuddy.db
       activeStatus: working
-      activeWithinMs: 120000
+      # SPEC-030：WorkBuddy 的等待态是 pending；长回合用 updated_at 兜底，窗口给到 10 分钟。
+      waitingStatuses: [pending, waiting, awaiting_approval, needs_input]
+      activeWithinMs: 600000
       notifyOnDone: true
       intervalMs: 5000
       maxFailures: 3

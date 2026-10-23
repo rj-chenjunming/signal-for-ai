@@ -46,8 +46,15 @@ import type { SqliteMonitorConfig } from '../../shared/types';
 
 /** 单次读取失败连续多少次后判 `unknown`。 */
 const DEFAULT_MAX_FAILURES = 3;
-/** 视为"仍在活动"的静默窗口。 */
-const DEFAULT_ACTIVE_WITHIN_MS = 120_000;
+/**
+ * 视为"仍在活动"的静默窗口（SPEC-030）。
+ *
+ * 原来是 120 秒 —— 对 AI 的长工具执行太短：WorkBuddy 一个回合里可以有十几分钟
+ * 不写 `last_activity_at`，灯就误判成灰（用户 2026-10-22 现场）。
+ * 与 SPEC-004/021 的 10 分钟兜底口径对齐；区分"真在干活"与"20 小时前的遗留
+ * working 记录"这个原始目的，10 分钟同样成立（实测遗留记录是 20 小时量级）。
+ */
+const DEFAULT_ACTIVE_WITHIN_MS = 600_000;
 
 /**
  * 启动宽限期（SPEC-007/AC-04）：监控启动前这么久以内完成的，仍算"刚完成"要提醒。
@@ -217,7 +224,7 @@ export function buildQueryScript(
     `const dbPath = ${JSON.stringify(database)};`,
     `const activeStatus = ${JSON.stringify(activeStatus)};`,
     `const completedStatus = ${JSON.stringify(states.completedStatus ?? 'completed')};`,
-    `const waitingStatuses = ${JSON.stringify(JSON.stringify(states.waitingStatuses ?? ['waiting', 'awaiting_approval', 'needs_input']))};`,
+    `const waitingStatuses = ${JSON.stringify(JSON.stringify(states.waitingStatuses ?? ['waiting', 'awaiting_approval', 'needs_input', 'pending']))};`,
     `const failedStatuses = ${JSON.stringify(JSON.stringify(states.failedStatuses ?? ['failed', 'error']))};`,
     `const withinMs = ${Number(activeWithinMs)};`,
     'const db = new DatabaseSync(dbPath, { readOnly: true });',
@@ -232,8 +239,15 @@ export function buildQueryScript(
     'const row = db.prepare(',
     "  'SELECT ' +",
     "    \"SUM(CASE WHEN lower(status) = lower(?) THEN 1 ELSE 0 END) AS activeCount, \" +",
-    "    \"SUM(CASE WHEN lower(status) = lower(?) AND last_activity_at IS NOT NULL \" +",
-    "    \"AND (? - last_activity_at) <= ? THEN 1 ELSE 0 END) AS freshActiveCount, \" +",
+    // SPEC-030：新鲜度取 last_activity_at 与 updated_at 的较大者。
+    //   last_activity_at 在 WorkBuddy 连续工具执行期间**不推进**（实测冻了 18 分钟），
+    //   只用它会把正在干活的会话判成 idle；updated_at 在每次状态写入（回合开始/
+    //   权限请求/完成）都会推进，是更可靠的"还在动"信号。
+    //   COALESCE 兜底 NULL（标量 MAX 只要有一个 NULL 就返回 NULL）。
+    //   陈旧遗留记录（20 小时量级）两个列都旧，仍然判不活跃。
+    "    \"SUM(CASE WHEN lower(status) = lower(?) \" +",
+    "    \"AND (? - MAX(COALESCE(last_activity_at, 0), COALESCE(updated_at, 0))) <= ? \" +",
+    "    \"THEN 1 ELSE 0 END) AS freshActiveCount, \" +",
     // 仅明确 completed，不能把失败、取消、等待或未知枚举洗成绿灯。
     //   不设时间窗口 —— "该不该亮绿灯"由 store 的确认水位决定，
     //   时间窗口会把还等着用户点击的信号冲掉（那正是要修的行为）

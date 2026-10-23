@@ -13,7 +13,11 @@
  * **遗留记录**。只看 status 会永远亮蓝，那就等于灯不反映真实状态。
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   buildQueryScript,
   deriveSqliteVerdict,
@@ -281,6 +285,127 @@ describe('SqliteMonitor 生命周期', () => {
     const unknown = events.filter((e) => e.kind === 'status' && e.status === 'unknown');
     expect(unknown.length).toBeGreaterThan(0);
   }, 20_000);
+});
+
+/**
+ * ★ SPEC-030：真实 SQLite 临时库 —— 锁住「新鲜度」与「等待态」的 SQL 语义。
+ *
+ * 为什么必须用真库：`freshActiveCount` / `freshWaitingCount` 是在生成的 SQL 里算的，
+ * 纯字符串断言证明不了「updated_at 新鲜但 last_activity_at 陈旧时算活跃」。
+ * 用临时库（不碰用户库）+ 系统 node（与生产同一条路径）跑一遍才是真证据。
+ */
+const systemNode = resolveSystemNode();
+
+/** 系统 node 是否带 node:sqlite（<22.5 时整组跳过，不算失败）。 */
+const hasSystemSqlite = (() => {
+  try {
+    execFileSync(systemNode, ['--no-warnings', '-e', "require('node:sqlite')"], {
+      stdio: 'ignore',
+      timeout: 10_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+const tempDirs: string[] = [];
+afterAll(() => {
+  for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
+});
+
+interface FixtureRow {
+  id: string;
+  status: string;
+  /** epoch ms；null 表示库里为 NULL（SPEC-030 用 updated_at 兜底）。 */
+  lastActivity: number | null;
+  updatedAt: number | null;
+}
+
+/** 用系统 node 建一个只有 sessions 表的临时库，返回路径。 */
+function makeFixtureDb(rows: FixtureRow[]): string {
+  const dir = mkdtempSync(join(tmpdir(), 'lamp-sqlite-'));
+  tempDirs.push(dir);
+  const dbPath = join(dir, 'fixture.db');
+  const values = rows
+    .map(
+      (r) =>
+        `ins.run(${JSON.stringify(r.id)}, ${JSON.stringify(r.status)}, ${r.lastActivity === null ? 'null' : String(r.lastActivity)}, ${r.updatedAt === null ? 'null' : String(r.updatedAt)});`,
+    )
+    .join('\n');
+  const script = [
+    "const { DatabaseSync } = require('node:sqlite');",
+    `const db = new DatabaseSync(${JSON.stringify(dbPath)});`,
+    "db.exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, status TEXT, last_activity_at INTEGER, updated_at INTEGER)');",
+    "const ins = db.prepare('INSERT INTO sessions (id,status,last_activity_at,updated_at) VALUES (?,?,?,?)');",
+    values,
+    'db.close();',
+  ].join('\n');
+  execFileSync(systemNode, ['--no-warnings', '-e', script], { stdio: 'ignore', timeout: 15_000 });
+  return dbPath;
+}
+
+/** 跑一次 buildQueryScript 生成的脚本，拿到汇总行。 */
+function probe(dbPath: string, withinMs: number): SqliteProbeRow {
+  const script = buildQueryScript(dbPath, 'working', withinMs);
+  const out = execFileSync(systemNode, ['--no-warnings', '-e', script], {
+    encoding: 'utf8',
+    timeout: 15_000,
+  });
+  return JSON.parse(out) as SqliteProbeRow;
+}
+
+describe.skipIf(!hasSystemSqlite)('★ SPEC-030 真实临时库（updated_at 兜底 / pending 等待态）', () => {
+  const NOW = Date.now();
+  const HOUR = 3_600_000;
+
+  it('updated_at 新鲜但 last_activity_at 陈旧 -> 仍算活跃（长回合不再误判灰）', () => {
+    // 真实现场：last_activity_at 17:25:57、updated_at 17:44:13（相差 18 分钟）
+    const db = makeFixtureDb([
+      { id: 'long-turn', status: 'working', lastActivity: NOW - 18 * 60_000, updatedAt: NOW - 60_000 },
+    ]);
+    const row = probe(db, 600_000);
+    expect(row.freshActiveCount).toBe(1);
+    expect(deriveSqliteVerdict(row, true, NOW).status).toBe('running');
+  });
+
+  it('last_activity_at 为 NULL 时也能用 updated_at 兜底', () => {
+    const db = makeFixtureDb([
+      { id: 'null-activity', status: 'working', lastActivity: null, updatedAt: NOW - 60_000 },
+    ]);
+    expect(probe(db, 600_000).freshActiveCount).toBe(1);
+  });
+
+  it('两者都陈旧 -> 不活跃（20 小时遗留 working 仍不能亮蓝）', () => {
+    const db = makeFixtureDb([
+      { id: 'stale-working', status: 'working', lastActivity: NOW - 20 * HOUR, updatedAt: NOW - 20 * HOUR },
+    ]);
+    const row = probe(db, 600_000);
+    expect(row.freshActiveCount).toBe(0);
+    expect(row.activeCount).toBe(1);
+    // 已确认水位设到"现在之后"，排除完成提醒干扰，只看活跃判定
+    expect(deriveSqliteVerdict(row, true, NOW).status).toBe('idle');
+  });
+
+  it('pending 计入等待态（默认 waiting 名单已含 pending）', () => {
+    const db = makeFixtureDb([
+      { id: 'permission', status: 'pending', lastActivity: NOW - 60_000, updatedAt: NOW - 60_000 },
+    ]);
+    const row = probe(db, 600_000);
+    expect(row.freshWaitingCount).toBe(1);
+    expect(deriveSqliteVerdict(row, true, NOW).status).toBe('waiting');
+  });
+
+  it('completed 的水位不受活动窗口影响（仍然亮绿到点击）', () => {
+    const doneAt = NOW - 5 * 60_000;
+    const db = makeFixtureDb([
+      { id: 'done', status: 'completed', lastActivity: doneAt, updatedAt: doneAt },
+    ]);
+    const row = probe(db, 600_000);
+    expect(row.freshActiveCount).toBe(0);
+    expect(row.lastDoneAt).toBe(doneAt);
+    expect(deriveSqliteVerdict(row, true, 0).status).toBe('success');
+  });
 });
 
 describe('配置校验（sqlite 型）', () => {

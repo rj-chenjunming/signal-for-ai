@@ -5,6 +5,9 @@
 | Spec ID | 文档 | 类型 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
 | BASELINE-000 | [当前基线](000-baseline.md) | 接管现状 | observed | 从当前提交核对，不补造历史 TDD |
+| SPEC-030 | [sqlite 监控的长回合活信号与等待态](030-workbuddy-long-turn-liveness.md) | bugfix（状态判定） | verifying | WorkBuddy 长回合 `last_activity_at` 不推进 → 120s 窗口误判灰；新鲜度改用 `MAX(last_activity_at, updated_at)` + 窗口 600s + `pending` 计入等待；Red 3 failed → Green 38；全量 937；真机待确认 |
+| SPEC-029 | [点击 web 任务时恢复最小化的浏览器窗口](029-restore-minimized-chrome-window.md) | bugfix（交互/窗口恢复） | verifying | 扩展只 `focused:true` 不还原最小化窗口 → 点 dsh-web 只亮任务栏图标；Red 1 failed/Green 4 passed，扩展 1.1.2；全量 932；真机待重载扩展确认 |
+| SPEC-028 | [悬浮灯「目标」行去掉框线痕迹](028-goal-row-frame.md) | bugfix（视觉） | verifying | 贴边点阵下目标行上方弯钩分隔线 + 2px 溢出导致的 4px 常驻滚动条，把图标「框」住；Red（gutter 4/溢出 2px、border-top 1px、横排横线 24px）→ Green（check:ui 32 PASS）；真机待确认 |
 | SPEC-027 | [目标进展本地同步入口](027-goal-progress-sync.md) | feature（自动化/集成） | done | `goal-sync` CLI + goal-inbox 轮询导入；Red 8失败 → Green 10；全量 928；实机 4 条 1 秒内导入、收件箱清空 |
 | SPEC-026 | [目标卡片拖拽排序](026-goal-reorder.md) | feature（交互） | done | 用户 2026-10-22 真机确认「验证通过了」；Red 6失败 → Green 40；全量 918、check:ui/check:goals PASS |
 | SPEC-025 | [悬浮灯「目标」行与新目标图标](025-overlay-goals-row.md) | feature（显示集成） | done | 用户 2026-10-22 12:31 真机确认「没问题」；Red 3失败 → Green 56；全量 909、check:ui 31、check:goals PASS |
