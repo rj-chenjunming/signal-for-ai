@@ -137,7 +137,7 @@ export class OverlayWindow {
     });
 
     this.options.logger.info(
-      `悬浮灯窗口已创建（${width}x${height} @${position.x},${position.y}，${this.stripTaskCount() >= 2 ? '灯带' : '单灯'}模式，任务数=${this.stripTaskCount()}）`,
+      `悬浮灯窗口已创建（${width}x${height} @${position.x},${position.y}，${this.stripTaskCount() >= 1 ? '灯带' : '单灯'}模式，行数=${this.stripTaskCount()}）`,
     );
 
     // ★ 启动即判定一次：上次拖到边缘的位置会被记进配置，下次启动时
@@ -174,8 +174,9 @@ export class OverlayWindow {
    * 必须与 `shared.css` 的 `.lamp-strip` 布局严格一致 —— 一旦算出比内容
    * 矮的画布，边缘圆点就会被窗口裁掉（"圆圈显示不完整"）。
    *
-   * - **单灯模式**（可显示行数 < 2）：正方形 `size + 24`。
+   * - **单灯模式**（可显示行数 < 1）：正方形 `size + 24`。
    *   这也就是"此刻没有任何东西活着"时的形态 —— 自动缩成一颗小灯。
+   *   （SPEC-040：1 行也用灯带，单工具的图标必须显示。）
    * - **灯带模式**（D6/D9）：竖排「总灯 + 每行一个」，宽度只占屏幕右侧一条。
    */
   private resolveCanvasSize(): { width: number; height: number } {
@@ -190,7 +191,7 @@ export class OverlayWindow {
     } catch {
       // 无 display 信息（极早期调用/无头环境）时用保守上限
     }
-    return resolveCanvasSize(this.settings.size, this.stripTaskCount(), maxHeight, this.dock, maxWidth, this.lastSnapshot?.stripMode === true);
+    return resolveCanvasSize(this.settings.size, this.stripTaskCount(), maxHeight, this.dock, maxWidth);
   }
 
   /**

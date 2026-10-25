@@ -121,8 +121,8 @@ export function stripCanvasHeight(rows: number): number {
 /**
  * 计算透明画布尺寸。
  *
- * @param lampSize  单灯直径（来自 lamp.size 设置）
- * @param taskCount 启用的任务数；< 2 时退回单灯形态
+ * @param lampSize  单灯直径（来自 lamp.size 设置；只在 0 行的单灯形态生效）
+ * @param taskCount 可显示行数（含目标行）；< 1 时退回单灯形态
  * @param maxHeight 高度上限（超出由 .strip-rows 自己滚动），默认 70vh
  * @param dock      停靠方向；非 none 时改用工具图标＋状态点
  * @param maxWidth 顶部停靠的可用宽度上限；长列表由渲染层滚动
@@ -133,13 +133,12 @@ export function resolveCanvasSize(
   maxHeight: number,
   dock: LampDock = 'none',
   maxWidth: number = Number.POSITIVE_INFINITY,
-  forceStrip: boolean = false,
 ): { width: number; height: number } {
   const base = Math.max(16, Math.round(lampSize));
 
-  // forceStrip：有「目标」行时，即使只有 0/1 个任务也要灯带；
-  // 0 行没有可绘制内容，仍退回单灯（避免开一个空灯带）。
-  if (taskCount < 1 || (taskCount < 2 && !forceStrip)) {
+  // 0 行（没有任何活着的东西，也没有目标行）没有可绘制内容，退回单灯。
+  // 1 行也是灯带 —— SPEC-040：只监控一个工具时同样要显示它的图标。
+  if (taskCount < 1) {
     const square = base + SINGLE_LAMP_EXTRA;
     return { width: square, height: square };
   }

@@ -35,7 +35,8 @@ function snapshot(count, paused = false, goalsSummary = null) {
   s.version = 1; s.paused = paused; s.aggregate = 'running'; s.runningCount = 1;
   s.tasks = s.tasks.map((t, i) => ({ ...t, toolKind: ['codex', 'dsh', 'dsh-web', 'workbuddy'][i % 4], status: states[i % 7], paused, unread: i % 7 === 2, portLabel: '很长的工具标签与端口名称', name: i === 0 ? 'Codex · 很长的任务名称 <b>纯文本</b>' : t.name, message: '示例任务状态 · 长文本自动换行，其他操作收进更多菜单。', startedAt: Date.now() - 127000, durationMs: 127000 }));
   s.displayTasks = s.tasks;
-  s.stripMode = count >= 2 || (goalsSummary !== null && goalsSummary.active > 0);
+  // SPEC-040：与 shared/visibility.ts 的 shouldShowStrip 同口径——可显示 ≥1 行就灯带。
+  s.stripMode = count >= 1 || (goalsSummary !== null && goalsSummary.active > 0);
   if (goalsSummary !== null) s.goalsSummary = goalsSummary;
   s.counts = Object.fromEntries(states.map(state => [state, s.tasks.filter(t => t.status === state).length]));
   return s;
@@ -79,9 +80,13 @@ async function page(role, size, data) {
 async function checkOverlay(count, dock, goalsSummary = null) {
   const goalRow = goalsSummary !== null && goalsSummary.active > 0 ? 1 : 0;
   const rows = count + goalRow;
-  const forceStrip = count >= 2 || goalRow > 0;
-  const size = resolveCanvasSize(28, rows, 300, dock, 400, forceStrip);
-  const win = await page('overlay', size, { dock, snapshot: snapshot(count, false, goalsSummary), overlayMessage: goalsSummary ? undefined : '无法定位终端：未配置可用的 cwd / logFile，且窗口聚焦失败' });
+  // SPEC-040：stripMode 已含目标行语义（≥1 行即灯带），画布直接按行数走新签名（无 forceStrip 参）。
+  const forceStrip = count >= 1 || goalRow > 0;
+  const size = resolveCanvasSize(28, rows, 300, dock, 400);
+  // SPEC-040：count=1 不注入 overlayMessage —— 94px 高的单行画布会被常驻 toast 盖住
+  // 唯一的图标行（count=3 画布高、行在 toast 之上不受影响），留下干净的形态证据图。
+  const overlayMessage = goalsSummary || count === 1 ? undefined : '无法定位终端：未配置可用的 cwd / logFile，且窗口聚焦失败';
+  const win = await page('overlay', size, { dock, snapshot: snapshot(count, false, goalsSummary), overlayMessage });
   try {
     const value = await win.webContents.executeJavaScript(`(() => {
       const rows = document.querySelector('#strip-rows');
@@ -126,8 +131,8 @@ async function checkOverlay(count, dock, goalsSummary = null) {
     assert.equal(value.toastWrap, 'nowrap'); assert.ok(value.toastHeight <= 36, 'narrow toast became vertical text');
     assert.ok(value.bodyWidth <= size.width && value.bodyHeight <= size.height, 'body exceeds canvas');
     // SPEC-035 特征锚：首行 running 的状态文案必须是「运行中」（statusLabel 输出口径）。
-    // count=1 是单灯模式，没有 strip 行，只在灯带形态（count>=2）断言。
-    if (count >= 2) {
+    // SPEC-040：count=1 也是灯带（单工具显示图标行），同样断言；count=0 无行可断言。
+    if (count >= 1) {
       assert.ok(/运行中$/.test(value.firstAria ?? ''), `overlay 行状态文案漂移：${value.firstAria}`);
     }
     for (const { row, dot, svg } of value.points.filter(point => point.hasDot)) {
@@ -171,6 +176,8 @@ async function checkOverlay(count, dock, goalsSummary = null) {
       assert.ok(value.last.right <= size.width && value.last.bottom <= size.height, 'last target outside window');
     }
     if (count === 3 && !goalsSummary) writeFileSync(path.join(out, `overlay-${dock}.png`), (await win.webContents.capturePage()).toPNG());
+    // SPEC-040：单工具形态（总灯 + 1 行图标）留目视证据。
+    if (count === 1 && !goalsSummary) writeFileSync(path.join(out, `overlay-single-${dock}.png`), (await win.webContents.capturePage()).toPNG());
     if (goalsSummary && dock === 'none') writeFileSync(path.join(out, `overlay-goals-${count}.png`), (await win.webContents.capturePage()).toPNG());
     // SPEC-028：贴边点阵的目标行必须留一张截图，作为「框线/滚动条」回归的目视证据。
     if (goalsSummary && dock !== 'none') writeFileSync(path.join(out, `overlay-goals-${dock}-${count}.png`), (await win.webContents.capturePage()).toPNG());
@@ -435,7 +442,7 @@ async function checkGoalsInputPreservation(theme) {
 
 // SPEC-032：点击任务行后必须同步进入"跳转中"过渡态，全部请求结算后解除。
 async function checkOverlayJumpFeedback() {
-  const size = resolveCanvasSize(28, 3, 300, 'none', 400, true);
+  const size = resolveCanvasSize(28, 3, 300, 'none', 400);
   const win = await page('overlay', size, { dock: 'none', snapshot: snapshot(3) });
   const probe = `(() => {
     const row = document.querySelector('.strip-row');

@@ -10,7 +10,8 @@
  * 选定的规则（用户确认）：
  *   - 隐藏：`unknown`（失联）、`failed`（失败）
  *   - 显示：`idle` / `starting` / `running` / `waiting` / `success`
- *   - 可显示行数 < 2 时整窗缩成单灯
+ *   - 可显示行数为 0（且无目标行）时整窗缩成单灯；
+ *     1 行也用灯带 —— SPEC-040：只监控一个工具时同样要显示它的图标
  *   - 所有监控类型统一适用
  */
 
@@ -133,7 +134,7 @@ describe('TaskStore 集成 —— stripMode 与 displayTasks', () => {
     expect(snap.hiddenCount).toBe(2);
   });
 
-  it('★ 一个活一个失联 -> 单灯（可显示数 1 < 2）', () => {
+  it('★ 一个活一个失联 -> 灯带（1 个活着的也要显示图标，SPEC-040）', () => {
     const store = new TaskStore([task('a'), task('b')]);
     store.apply('a', { status: 'running', isSignal: true });
     for (let i = 0; i < 2; i += 1) {
@@ -141,7 +142,8 @@ describe('TaskStore 集成 —— stripMode 与 displayTasks', () => {
       store.apply('b', { status: 'unknown', isSignal: true });
     }
     const snap = store.getSnapshot();
-    expect(snap.stripMode).toBe(false);
+    // 可显示行数 1：不再缩成单灯——那会让唯一的工具连图标都没有
+    expect(snap.stripMode).toBe(true);
     expect(snap.displayTasks.map((t) => t.taskId)).toEqual(['a']);
     expect(snap.hiddenCount).toBe(1);
   });

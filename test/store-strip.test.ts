@@ -84,9 +84,9 @@ describe('derivePortLabel', () => {
 describe('Snapshot.stripMode —— 与 OverlayWindow 的口径必须一致', () => {
   const opts = { logger: { warn: () => undefined, error: () => undefined } };
 
-  it('单个启用任务 -> 单灯（stripMode=false）', () => {
+  it('单个启用任务 -> 灯带（SPEC-040：单工具也要显示图标）', () => {
     const store = new TaskStore([dshTask('a', '127.0.0.1:3080')], opts);
-    expect(store.getSnapshot().stripMode).toBe(false);
+    expect(store.getSnapshot().stripMode).toBe(true);
   });
 
   it('两个启用任务 -> 灯带（stripMode=true）', () => {
@@ -97,7 +97,7 @@ describe('Snapshot.stripMode —— 与 OverlayWindow 的口径必须一致', ()
     expect(store.getSnapshot().stripMode).toBe(true);
   });
 
-  it('只有 1 个启用、其余禁用 -> 仍是单灯（禁用任务不占灯位）', () => {
+  it('只有 1 个启用、其余禁用 -> 灯带（禁用任务不占行位）', () => {
     const store = new TaskStore(
       [
         dshTask('a', '127.0.0.1:3080', true),
@@ -106,9 +106,10 @@ describe('Snapshot.stripMode —— 与 OverlayWindow 的口径必须一致', ()
       ],
       opts,
     );
-    // 这条是防错位的关键：OverlayWindow 数的是 enabled 任务数，
-    // store 若按"全部任务数"判定，就会出现窗口按灯带开、内容按单灯渲染。
-    expect(store.getSnapshot().stripMode).toBe(false);
+    // 这条仍是防错位的关键：形态判定必须数"可显示"任务，
+    // 数错就会出现窗口按灯带开、内容按单灯渲染（或反之）。
+    // SPEC-040：可显示 1 行也用灯带——单工具的图标必须显示出来。
+    expect(store.getSnapshot().stripMode).toBe(true);
   });
 
   it('三个启用任务（混合类型）-> 灯带', () => {

@@ -4,6 +4,7 @@
 
 | Spec ID | 文档 | 类型 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
+| SPEC-040 | [只监控一个工具时也显示该工具的图标](040-single-tool-icon.md) | bugfix（显示形态） | done | 灯带阈值 ≥2 → ≥1：1 个可见任务也渲染「总灯+图标行」，单灯保留给 0 行；forceStrip 参数删除。Red 8 failed→Green 92/92；check:ui 35 场景；全量 950/951（+1 项既有 process-presence-io 抖动，已对照 HEAD 披露）。**2026-10-25 用户真机确认「没问题」** |
 | SPEC-039 | [Electron 升级 33 → 34.5.8（含仓库 ACL 解毒）](039-electron-34-upgrade.md) | chore（依赖/环境） | done | **根因修正**：非版本问题——仓库根被沙箱工具写入 `Everyone DENY(DC)` + 低完整性标签，任何 Electron 在此目录沙箱初始化即崩（SPEC-031 §6 的版本结论被推翻）；ACL 已备份并解毒。pin 升 34.5.8 后全量 952/952、夹具回到 pin 版全过。真机双击启动待用户确认 |
 | SPEC-038 | [目标窗口 keyed 增量渲染](038-goals-keyed-rendering.md) | refactor（纯重构） | done | 已落地：卡片按 goal.id 缓存复用（节点身份断言过）、armed 删除确认态推送下保持、SPEC-031 快照机制退役为仅滚动位置；SPEC-031 断言原样全过，全量 952/952（Electron 34.5.8）。真机 IME 组合不中断 2026-10-25 用户确认通过 |
 | SPEC-037 | [焦点 worker 承载枚举/隐藏查询/原生恢复](037-focus-worker-remaining-ops.md) | refactor（性能/架构） | done | refreshWindows/findHiddenWindow/revealNativeWindow 全部 worker 优先（脚本预编译一次），解析函数共享、失败回落 spawn；stdin 非 ASCII 统一 \uXXXX 转义。真实 worker enumerate/hidden 只读集成通过；全量 952/952。真机时延对比待做 |

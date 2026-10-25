@@ -79,9 +79,11 @@ describe('summarizeGoals', () => {
 });
 
 describe('shouldShowStrip', () => {
-  it('没有目标行时保持原规则：任务 ≥2 才用灯带', () => {
+  // SPEC-040：阈值 ≥2 → ≥1。只监控一个工具时也要显示它的图标，
+  // 单灯形态保留给"没有任何活着的东西"（0 行且无目标行）。
+  it('任务 ≥1 就用灯带（SPEC-040：单工具也显示图标）', () => {
     expect(shouldShowStrip(0, 0)).toBe(false);
-    expect(shouldShowStrip(1, 0)).toBe(false);
+    expect(shouldShowStrip(1, 0)).toBe(true);
     expect(shouldShowStrip(2, 0)).toBe(true);
   });
 
@@ -93,10 +95,10 @@ describe('shouldShowStrip', () => {
 });
 
 describe('TaskStore 与目标摘要（SPEC-025）', () => {
-  it('没有目标摘要时保持单灯', () => {
+  it('没有目标摘要时按任务数定形态（1 个任务也灯带，SPEC-040）', () => {
     const store = new TaskStore([webhookTask('one')]);
     expect(store.getSnapshot().goalsSummary).toBeUndefined();
-    expect(store.getSnapshot().stripMode).toBe(false);
+    expect(store.getSnapshot().stripMode).toBe(true);
   });
 
   it('有进行中目标时，即使只有 1 个任务也进入灯带并把摘要带进快照', () => {
@@ -115,11 +117,11 @@ describe('TaskStore 与目标摘要（SPEC-025）', () => {
     expect(store.getSnapshot().version).toBe(version);
   });
 
-  it('进行中目标清零后回到原规则（1 个任务 => 单灯）', () => {
+  it('进行中目标清零后回到无目标规则（1 个任务仍灯带，SPEC-040）', () => {
     const store = new TaskStore([webhookTask('one')]);
     store.setGoalsSummary({ active: 1, done: 0, progress: 40 });
     store.setGoalsSummary({ active: 0, done: 1, progress: 0 });
-    expect(store.getSnapshot().stripMode).toBe(false);
+    expect(store.getSnapshot().stripMode).toBe(true);
     expect(store.getSnapshot().goalsSummary).toEqual({ active: 0, done: 1, progress: 0 });
   });
 

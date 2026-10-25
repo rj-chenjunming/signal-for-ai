@@ -224,17 +224,22 @@ describe('★ 回归：画布必须能容纳 CSS 内容（"圆圈显示不完整
 });
 
 describe('resolveCanvasSize —— 单灯与灯带两种形态', () => {
-  it('任务数 < 2 时退回单灯（正方形）', () => {
-    expect(resolveCanvasSize(28, 1, 900)).toEqual({ width: 52, height: 52 });
+  // SPEC-040：只有 0 行（没有任何活着的东西）才退回单灯；
+  // 1 行也是灯带——单工具同样要显示它的图标。
+  it('任务数为 0 才退回单灯（正方形）；1 行也是灯带', () => {
     expect(resolveCanvasSize(28, 0, 900)).toEqual({ width: 52, height: 52 });
+    expect(resolveCanvasSize(28, 1, 900)).toEqual({
+      width: stripCanvasWidth(),
+      height: stripCanvasHeight(1),
+    });
   });
 
-  it('单灯尺寸随 lamp.size 变化', () => {
-    expect(resolveCanvasSize(40, 1, 900)).toEqual({ width: 40 + SINGLE_LAMP_EXTRA, height: 40 + SINGLE_LAMP_EXTRA });
+  it('单灯尺寸随 lamp.size 变化（0 行）', () => {
+    expect(resolveCanvasSize(40, 0, 900)).toEqual({ width: 40 + SINGLE_LAMP_EXTRA, height: 40 + SINGLE_LAMP_EXTRA });
   });
 
   it('lamp.size 过小时按 16 兜底（防算出 0 宽窗口）', () => {
-    const { width } = resolveCanvasSize(0, 1, 900);
+    const { width } = resolveCanvasSize(0, 0, 900);
     expect(width).toBe(16 + SINGLE_LAMP_EXTRA);
   });
 
@@ -261,16 +266,9 @@ describe('resolveCanvasSize —— 单灯与灯带两种形态', () => {
     expect(width).toBeGreaterThanOrEqual(100);
   });
 
-  it('forceStrip：目标行让 0/1 个任务也采用灯带尺寸', () => {
-    expect(resolveCanvasSize(28, 1, 900, 'none', 1200, true)).toEqual({
-      width: stripCanvasWidth(),
-      height: stripCanvasHeight(1),
-    });
-    // 没有目标行时维持原行为
-    expect(resolveCanvasSize(28, 1, 900, 'none', 1200, false)).toEqual({ width: 52, height: 52 });
-    // 0 行没有可绘制内容，仍退回单灯
-    expect(resolveCanvasSize(28, 0, 900, 'none', 1200, true)).toEqual({ width: 52, height: 52 });
-  });
+  // SPEC-040：旧实现有 forceStrip 第 6 参为「0/1 个任务 + 目标行」兜底；
+  // 阈值改为 ≥1 后「stripTaskCount ≥ 1 ⟺ stripMode」，参数不再携带信息，已删除。
+  // 「0 任务 + 目标行」在本函数的输入里就是 1 行，由上面「1 行也是灯带」用例覆盖。
 });
 
 /* ============================================================================
@@ -429,9 +427,11 @@ describe('compactCanvasSize —— 点阵形态尺寸', () => {
     expect(compact.width).toBeLessThan(strip.width / 2);
   });
 
-  it('resolveCanvasSize 传 dock 时走点阵；行数 < 2 仍是单灯（点阵无意义）', () => {
+  it('resolveCanvasSize 传 dock 时走点阵；行数 0 仍是单灯', () => {
     expect(resolveCanvasSize(28, 3, 900, 'top')).toEqual(compactCanvasSize(3, 'top'));
-    expect(resolveCanvasSize(28, 1, 900, 'top')).toEqual({ width: 52, height: 52 });
+    // SPEC-040：单工具贴边也显示图标位（总灯 + 1 个图标）
+    expect(resolveCanvasSize(28, 1, 900, 'top')).toEqual(compactCanvasSize(1, 'top'));
+    expect(resolveCanvasSize(28, 0, 900, 'top')).toEqual({ width: 52, height: 52 });
   });
 
   it('★ 交叉校验：COMPACT_PAD 与 dock 形态的 .lamp-strip padding 一致', () => {
