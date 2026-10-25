@@ -23,6 +23,20 @@ describe('SPEC-012 task presentation metadata', () => {
   });
 });
 
+describe('SPEC-041 ZCode 图标', () => {
+  it('zcode 型任务使用 zcode toolKind，热重载切换并保留运行与完成元数据', () => {
+    const cfg: TaskConfig = { id: 'task', name: 'ZCode', enabled: true, monitor: { type: 'zcode' } };
+    const store = new TaskStore([cfg]);
+    store.apply('task', { status: 'running' });
+    store.apply('task', { status: 'success', completionAt: 789 });
+    expect(store.getTask('task')).toMatchObject({ toolKind: 'zcode', status: 'success', lastCompletionAt: 789, unread: true });
+    store.syncTasks([{ ...cfg, monitor: { type: 'codex' } }]);
+    expect(store.getTask('task')).toMatchObject({ toolKind: 'codex', status: 'success', lastCompletionAt: 789, unread: true });
+    store.syncTasks([{ ...cfg, monitor: { type: 'zcode' } }]);
+    expect(store.getTask('task')).toMatchObject({ toolKind: 'zcode' });
+  });
+});
+
 describe('SPEC-019 dsh Web 图标', () => {
   it('dsh 任务按配置的浏览器 URL 跳转字段使用 dsh-web，桌面 dsh 保持不变', () => {
     const configs: TaskConfig[] = [

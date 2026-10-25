@@ -8,6 +8,7 @@
 | [dsh-web.svg](dsh-web.svg) | dsh Web | 浏览器窗口里的小鲸鱼 |
 | [workbuddy.svg](workbuddy.svg) | WorkBuddy | 小猫 |
 | [codex.svg](codex.svg) | GPT / Codex | 小机器人 |
+| [zcode.svg](zcode.svg) | ZCode | 裸 Z（单笔画：顶横→对角→底横） |
 
 2026-10-20 用户明确修订：WorkBuddy 对应小猫，GPT 对应小机器人，并增加 dsh Web 形式。本版替代首版对话搭档/小终端造型；GPT/Codex 先共用机器人素材，不新增或改变进程识别规则。
 

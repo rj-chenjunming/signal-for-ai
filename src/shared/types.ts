@@ -244,13 +244,40 @@ export interface CodexMonitorConfig extends MonitorConfigBase {
   activeWithinMs?: number;
 }
 
+/**
+ * ZCode 会话库（`~/.zcode/cli/db/db.sqlite`）的只读轮询监控（SPEC-041）。
+ *
+ * 只 SELECT 元数据列（session/tool_usage/turn_usage/model_usage 的状态与时间戳），
+ * 不读 message/part 正文，不读 model-io 转储与凭据目录。
+ */
+export interface ZCodeMonitorConfig extends MonitorConfigBase {
+  type: 'zcode';
+  /** 会话库路径，默认 `%USERPROFILE%/.zcode/cli/db/db.sqlite`。 */
+  dbPath?: string;
+  /**
+   * 按 `session.directory` 过滤的项目目录（归一化比较：大小写/分隔符不敏感）；
+   * 空/缺省 = 全部项目聚合为一行。
+   */
+  projects?: string[];
+  /** 轮询间隔，默认 3000。 */
+  intervalMs?: number;
+  /**
+   * 开放回合/工具/模型请求仍视为运行中的新鲜窗（毫秒），默认 600000。
+   * 分钟级窗口吸取 SPEC-030 教训：长工具执行期间会话可能不写库。
+   */
+  activeWithinMs?: number;
+  /** 数据库读取失败连续多少次后判 unknown（默认 3）。 */
+  maxFailures?: number;
+}
+
 export type MonitorConfig =
   | ProcessMonitorConfig
   | LogMonitorConfig
   | WebhookMonitorConfig
   | DshMonitorConfig
   | SqliteMonitorConfig
-  | CodexMonitorConfig;
+  | CodexMonitorConfig
+  | ZCodeMonitorConfig;
 
 /** 依据 `type` 字段做类型收窄的运行时分派器。 */
 export function isProcessMonitor(cfg: MonitorConfig): cfg is ProcessMonitorConfig {
@@ -266,6 +293,11 @@ export function isWebhookMonitor(cfg: MonitorConfig): cfg is WebhookMonitorConfi
 /** dsh 多端口监控的类型收窄（与上方各守卫同风格）。 */
 export function isDshMonitor(cfg: MonitorConfig): cfg is DshMonitorConfig {
   return cfg.type === 'dsh';
+}
+
+/** ZCode 会话库监控的类型收窄（与上方各守卫同风格）。 */
+export function isZcodeMonitor(cfg: MonitorConfig): cfg is ZCodeMonitorConfig {
+  return cfg.type === 'zcode';
 }
 
 /** SQLite 监控的类型收窄（WorkBuddy 任务态语义）。 */
@@ -405,7 +437,7 @@ export interface TaskState {
   processPresent?: boolean;
   taskId: string;
   /** 主进程推导的显示元数据；旧快照由渲染层兜底。 */
-  toolKind?: 'codex' | 'dsh' | 'dsh-web' | 'workbuddy' | 'generic';
+  toolKind?: 'codex' | 'dsh' | 'dsh-web' | 'workbuddy' | 'zcode' | 'generic';
   availableActions?: TaskAction[];
   name: string;
   status: TaskStatus;

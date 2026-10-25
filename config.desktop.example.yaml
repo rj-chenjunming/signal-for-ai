@@ -78,3 +78,22 @@ tasks:
       terminal:
         type: windowProcess
         processNames: [Codex.exe]
+
+  - id: zcode
+    name: ZCode
+    enabled: true
+    monitor:
+      type: zcode
+      # SPEC-041：只读轮询 ZCode 会话库（只取元数据列，不读会话正文）。
+      # 缺省读 %USERPROFILE%/.zcode/cli/db/db.sqlite；自定义时显式设置：
+      # dbPath: D:/your-home/.zcode/cli/db/db.sqlite
+      # 按项目目录过滤（大小写/分隔符不敏感）；注释掉即聚合全部项目为一行。
+      # projects:
+      #   - C:/Users/you/PRJ/ai-signal
+      # 分钟级新鲜窗（SPEC-030 教训）：长工具执行期间会话可能不写库。
+      intervalMs: 3000
+      activeWithinMs: 600000
+    jump:
+      terminal:
+        type: windowProcess
+        processNames: ["ZCode.exe"]

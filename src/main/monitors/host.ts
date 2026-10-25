@@ -34,6 +34,7 @@ import { DshSignalArbiter, type ExactSessionSignal } from './dsh-arbiter';
 import { SshCredentialsSource } from './dsh-remote-auth';
 import { SqliteMonitor } from './sqlite';
 import { CodexMonitor } from './codex';
+import { ZCodeMonitor } from './zcode';
 
 /** 一个任务与其适配器的绑定。 */
 interface Binding {
@@ -211,6 +212,8 @@ export class MonitorHost {
         return new CodexMonitor(ctx, task.monitor);
       case 'sqlite':
         return new SqliteMonitor(ctx, task.monitor);
+      case 'zcode':
+        return new ZCodeMonitor(ctx, task.monitor);
       case 'dsh': {
         const secretSources = this.secretSourcesFor(task.monitor.dshHome, task.monitor.sshHost);
         const pluginState = this.resolvePluginStateFor();

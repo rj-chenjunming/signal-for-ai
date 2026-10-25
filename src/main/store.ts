@@ -47,8 +47,9 @@ function isDshWebTarget(cfg: TaskConfig): boolean {
 function presentationFor(cfg: TaskConfig): Pick<TaskState, 'toolKind' | 'availableActions'> {
   const kind = cfg.monitor.type;
   const toolKind = kind === 'codex' ? 'codex'
-    : kind === 'dsh' ? (isDshWebTarget(cfg) ? 'dsh-web' : 'dsh')
-      : /workbuddy/i.test(`${cfg.id} ${cfg.name}`) ? 'workbuddy' : 'generic';
+    : kind === 'zcode' ? 'zcode'
+      : kind === 'dsh' ? (isDshWebTarget(cfg) ? 'dsh-web' : 'dsh')
+        : /workbuddy/i.test(`${cfg.id} ${cfg.name}`) ? 'workbuddy' : 'generic';
   const availableActions: NonNullable<TaskState['availableActions']> = ['focus_terminal'];
   if (cfg.jump?.logFile) availableActions.push('open_log');
   if (cfg.jump?.cwd) availableActions.push('open_dir');

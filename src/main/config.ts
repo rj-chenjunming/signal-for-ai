@@ -36,6 +36,7 @@ import {
   type ColorOverrides,
   type DshMonitorConfig,
   type CodexMonitorConfig,
+  type ZCodeMonitorConfig,
   type JumpConfig,
   type LampSettings,
   type LogMonitorConfig,
@@ -534,10 +535,35 @@ function validateMonitor(raw: unknown, taskId: string, warn: (m: string) => void
   if (type === 'dsh') return validateDshMonitor(raw, taskId, warn);
   if (type === 'codex') return validateCodexMonitor(raw, taskId, warn);
   if (type === 'sqlite') return validateSqliteMonitor(raw, taskId, warn);
+  if (type === 'zcode') return validateZcodeMonitor(raw, taskId, warn);
   warn(
-    `任务 ${taskId}: monitor.type 非法（${String(type)}），合法值 process/log/webhook/dsh/sqlite/codex，已丢弃该任务`,
+    `任务 ${taskId}: monitor.type 非法（${String(type)}），合法值 process/log/webhook/dsh/sqlite/codex/zcode，已丢弃该任务`,
   );
   return null;
+}
+
+/**
+ * 校验 zcode 型监控配置（SPEC-041）。容错原则与 codex 型一致：
+ * 单个字段非法只丢弃该字段并记警告；没有必填字段（dbPath 缺省读默认路径）。
+ */
+function validateZcodeMonitor(raw: Record<string, unknown>, taskId: string, warn: (m: string) => void): ZCodeMonitorConfig {
+  const cfg: ZCodeMonitorConfig = { type: 'zcode' };
+  if (typeof raw.dbPath === 'string' && raw.dbPath.trim()) cfg.dbPath = raw.dbPath.trim();
+  else if (raw.dbPath !== undefined) warn(`任务 ${taskId}: zcode.dbPath 非法，使用默认会话库路径`);
+  if (Array.isArray(raw.projects)) {
+    const projects = raw.projects.filter((p): p is string => typeof p === 'string' && p.trim().length > 0).map(p => p.trim());
+    if (projects.length !== raw.projects.length) warn(`任务 ${taskId}: zcode.projects 含非法元素，已丢弃非法项`);
+    if (projects.length > 0) cfg.projects = projects;
+    else if (raw.projects.length > 0) warn(`任务 ${taskId}: zcode.projects 无有效元素，忽略（聚合全部项目）`);
+  } else if (raw.projects !== undefined) {
+    warn(`任务 ${taskId}: zcode.projects 非法，忽略（聚合全部项目）`);
+  }
+  for (const key of ['intervalMs', 'activeWithinMs', 'maxFailures'] as const) {
+    const value = readPositiveInt(raw[key]);
+    if (value !== undefined) cfg[key] = Math.max(key === 'intervalMs' ? 500 : 1, value);
+    else if (raw[key] !== undefined) warn(`任务 ${taskId}: zcode.${key} 非法，使用默认值`);
+  }
+  return cfg;
 }
 
 function validateCodexMonitor(raw: Record<string, unknown>, taskId: string, warn: (m: string) => void): CodexMonitorConfig {

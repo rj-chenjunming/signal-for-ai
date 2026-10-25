@@ -10,7 +10,7 @@ const normalize = (name: string): string => name.trim().toLowerCase().replace(/\
 /** Explicit desktop routes only. Remote/web/CLI sources keep their existing lifecycle. */
 export function desktopProcessNames(task: TaskConfig): readonly string[] {
   const monitor = task.monitor;
-  if (!['dsh', 'sqlite', 'codex'].includes(monitor.type)) return [];
+  if (!['dsh', 'sqlite', 'codex', 'zcode'].includes(monitor.type)) return [];
   if (monitor.type === 'dsh') {
     if (monitor.sshHost) return [];
     if (monitor.authority !== 'auto') {

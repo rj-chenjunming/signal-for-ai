@@ -20,12 +20,13 @@ it('shares in-flight reads and short cache, bypasses cache for errors and retrie
   now += 1001; read.mockRejectedValueOnce(new Error('timeout')); await expect(reader()).rejects.toThrow('timeout');
   read.mockResolvedValueOnce(inventory); await reader(); expect(read).toHaveBeenCalledTimes(4);
 });
-it('gates all three explicit desktop tools, but excludes web/CLI/remote and generic monitors', () => {
+it('gates all four explicit desktop tools, but excludes web/CLI/remote and generic monitors', () => {
   const route = { terminal: { type: 'windowProcess' as const, processNames: [' App.EXE ', 'app'] } };
   const dsh: TaskConfig = { id: 'd', name: 'd', enabled: true, monitor: { type: 'dsh', authority: 'auto' }, jump: route };
   expect(desktopProcessNames(dsh)).toEqual(['app']);
   expect(desktopProcessNames({ ...dsh, monitor: { type: 'sqlite', database: '/fixture' } })).toEqual(['app']);
   expect(desktopProcessNames({ ...dsh, monitor: { type: 'codex', sessionsDir: '/fixture' }, jump: { terminal: { type: 'windowTitle', match: 'x', processNames: ['app.exe'] } } })).toEqual(['app']);
+  expect(desktopProcessNames({ ...dsh, monitor: { type: 'zcode', dbPath: '/fixture' } })).toEqual(['app']);
   expect(desktopProcessNames({ ...dsh, monitor: { type: 'dsh', authority: '127.0.0.1:123' } })).toEqual(['app']);
   for (const authority of ['server.example:123', '192.168.1.1:123']) {
     expect(desktopProcessNames({ ...dsh, monitor: { type: 'dsh', authority } })).toEqual([]);

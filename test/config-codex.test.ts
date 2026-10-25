@@ -8,10 +8,10 @@ describe('SPEC-002 Codex 配置', () => {
     expect(config.tasks).toHaveLength(1);
     expect(config.tasks[0].monitor).toEqual({ type: 'codex', sessionsDir: '/fixture/sessions', intervalMs: 2000, activeWithinMs: 300000 });
   });
-  it('三工具桌面模板完整解析且全部定位显式进程窗口', () => {
+  it('四工具桌面模板完整解析且全部定位显式进程窗口', () => {
     const { config, warnings } = parseConfigText(readFileSync('config.desktop.example.yaml', 'utf8'));
     expect(warnings).toEqual([]);
-    expect(config.tasks.map(t => t.monitor.type)).toEqual(['dsh', 'sqlite', 'codex']);
+    expect(config.tasks.map(t => t.monitor.type)).toEqual(['dsh', 'sqlite', 'codex', 'zcode']);
     expect(config.tasks.every(t => t.enabled && t.jump?.terminal?.type === 'windowProcess')).toBe(true);
     expect(config.tasks.every(t => t.jump?.cwd === undefined && t.jump?.openUrl === undefined)).toBe(true);
   });
