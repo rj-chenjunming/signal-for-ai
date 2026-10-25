@@ -59,7 +59,9 @@ async function fixture(fail = false, pendingMessage?: string) {
   const send = vi.fn(async () => ({ ok: true })); const toggle = vi.fn();
   const document = { getElementById: get, createElement: (tag: string) => new Element(tag), body: root, querySelector: root.querySelector.bind(root), querySelectorAll: root.querySelectorAll.bind(root), addEventListener: root.addEventListener.bind(root) };
   runInNewContext(ts.transpileModule(readFileSync('src/renderer/panel.ts', 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, {
-    document, console, window: { setInterval: vi.fn(), setTimeout: vi.fn(), clearTimeout: vi.fn(), aiIndicator: { getSnapshot: async () => store.getSnapshot(), onSnapshot: (fn: typeof update) => { update = fn; }, onToast: vi.fn(), takePanelMessage: async () => ({ message: pendingMessage }), sendTaskAction: send, togglePanel: toggle, setMonitoringPaused: pause } },
+    document, console, window: { setInterval: vi.fn(), setTimeout: vi.fn(), clearTimeout: vi.fn(), aiIndicator: { getSnapshot: async () => store.getSnapshot(), onSnapshot: (fn: typeof update) => { update = fn; }, onToast: vi.fn(), takePanelMessage: async () => ({ message: pendingMessage }), sendTaskAction: send, togglePanel: toggle, setMonitoringPaused: pause },
+      // SPEC-035：共享助手替身（panel.ts 加载即解构 window.aiUi）。
+      aiUi: { statusLabel: (status: string) => ({ idle: '空闲', starting: '启动中', running: '运行中', waiting: '等待授权', success: '已完成', failed: '失败', unknown: '失联' } as Record<string, string>)[status] ?? '空闲' } },
   });
   await settle(); return { get, root, pause, send, toggle, store, update: () => update(store.getSnapshot()) };
 }
