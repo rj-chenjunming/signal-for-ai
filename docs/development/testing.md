@@ -58,6 +58,8 @@ npm test -- test/store-ack-completion.test.ts -t '用例名称'
 | Electron 渲染夹具 | 构建后 `npm run check:ui` | 隐藏窗口验证四种布局/长列表/深浅色，截图在 `logs/spec012-ui`；无真实工具 IO，不替代 OS 鼠标、托盘、DPI/多屏验收 |
 | Electron 目标窗口集成 | 构建后 `npm run check:goals` | 真实 GoalsWindow + preload + IPC + GoalsStore，隐藏窗口驱动新增/进度/记录/完成/导出/隐藏/重开；导出写临时文件，不弹系统对话框，不替代托盘与 OS 焦点验收 |
 
+两个 Electron 夹具支持 `AITI_ELECTRON` 环境变量指定验证用的 Electron 二进制（相对仓库根调用）。2026-10-24 曾用它借 Electron 31.7.7 验证；**2026-10-25 SPEC-039 已查明根因**：仓库根目录 ACL 被沙箱工具写入毒性条目（Everyone DENY Delete-Child + 低完整性标签），任何 Electron 在该目录内沙箱初始化都崩，与版本无关；ACL 解毒后夹具已回归仓库 pin 版（现 34.5.8）全过，`AITI_ELECTRON` 仅作为应急手段保留。
+
 ## Windows 与外部服务验收记录
 
 对每个相关 AC 记录：Windows/Node/Electron 版本、构建提交、配置模板及脱敏覆盖项、前置条件、操作步骤、预期、实际、日志/截图位置。扩展用仓库 `extension/` 按[安装说明](../../extension/README.md)加载；不能以 mock 命中代替真实标签页切换。

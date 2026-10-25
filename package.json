@@ -24,7 +24,7 @@
     "start:demo": "node scripts/start.mjs -- --config ./config.demo.yaml"
   },
   "dependencies": {
-    "electron": "^33.0.0",
+    "electron": "^34.5.8",
     "yaml": "^2.5.1"
   },
   "devDependencies": {

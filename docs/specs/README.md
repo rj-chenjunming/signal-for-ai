@@ -4,6 +4,15 @@
 
 | Spec ID | 文档 | 类型 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
+| SPEC-039 | [Electron 升级 33 → 34.5.8（含仓库 ACL 解毒）](039-electron-34-upgrade.md) | chore（依赖/环境） | done | **根因修正**：非版本问题——仓库根被沙箱工具写入 `Everyone DENY(DC)` + 低完整性标签，任何 Electron 在此目录沙箱初始化即崩（SPEC-031 §6 的版本结论被推翻）；ACL 已备份并解毒。pin 升 34.5.8 后全量 952/952、夹具回到 pin 版全过。真机双击启动待用户确认 |
+| SPEC-038 | [目标窗口 keyed 增量渲染](038-goals-keyed-rendering.md) | refactor（纯重构） | ready | 设计定案待执行：卡片按 goal.id 复用（IME/选区/armed 确认天然存活），快照逻辑缩减为滚动；SPEC-031 断言全部保留为特征测试。本会话主动收口（见规格 §6） |
+| SPEC-037 | [焦点 worker 承载枚举/隐藏查询/原生恢复](037-focus-worker-remaining-ops.md) | refactor（性能/架构） | done | refreshWindows/findHiddenWindow/revealNativeWindow 全部 worker 优先（脚本预编译一次），解析函数共享、失败回落 spawn；stdin 非 ASCII 统一 \uXXXX 转义。真实 worker enumerate/hidden 只读集成通过；全量 952/952。真机时延对比待做 |
+| SPEC-036 | [常驻 PowerShell 焦点 worker（激活路径）](036-focus-worker-activate.md) | refactor（性能/架构） | done | activate 走常驻 worker（C# 预编译一次，stdio JSON-lines），失败无条件回落按次 spawn；真实 PowerShell ping 集成通过；既有 focus 84 项零改动。枚举/隐藏/恢复 op 迁移留 SPEC-037。真机时延对比待做 |
+| SPEC-035 | [渲染层共享助手收敛（shared-ui.ts）](035-renderer-shared-helpers.md) | refactor（纯重构） | done | `window.aiUi = { statusLabel, formatTime, el }` 单点承载口径，三窗口删本地副本；特征锚先行（原代码通过）后重构；全量 939/939、check:ui/check:goals/smoke 0。真机/Electron 33 复核同 SPEC-031 挂起 |
+| SPEC-034 | [时间线跨年时间格式统一与 GoalsStore 定向查询](034-time-format-and-store-query.md) | bugfix（显示一致性）+ refactor | done | UI 跨年显示补时间与 formatGoalTime 同构；applyLine 弃逐行 getView 深拷贝改 findGoal/findGoalsByTitle。Red：vitest 2 失败（方法缺失）+ check:ui 跨年断言失败；Green：39/39 vitest、check:ui/check:goals 0。过程抓住"深拷贝 findGoal 覆盖内部活引用版"设计错误（内部改名 findLiveGoal）。真机验收待做 |
+| SPEC-033 | [目标窗口输入框内的 Escape 不再隐藏窗口](033-escape-input-hierarchy.md) | bugfix（键盘层级） | done | 输入框内 Esc=失焦保草稿，焦点在外 Esc 仍隐藏；Red 抓到既有缺陷：标题编辑 Esc 也会隐藏窗口。Red：check:goals AC-01 失败；Green：check:goals 0。真机验收待做 |
+| SPEC-032 | [悬浮灯任务行点击的即时跳转反馈](032-focus-click-feedback.md) | bugfix（交互/反馈） | done | 点击行同步进入 is-jumping 过渡态（aria-busy+0.12s 变暗），全部请求结算后解除、8s 保护窗。Red：check:ui AC-01 失败；Green：35 用例 0。附带补 overlay-actions stub 的 removeAttribute。像素级变暗待真机 |
+| SPEC-031 | [目标窗口输入态在数据推送下不被破坏](031-goals-input-preservation.md) | bugfix（交互/渲染） | done | 推送重绘前快照/恢复草稿、标题编辑态、光标、滚动；提交失败保草稿；提交成功清"当前 DOM 输入框"防复活。Red：check:ui AC-01/02/04 + check:goals AC-01 失败；Green：两夹具 0。keyed 增量渲染列为后续重构候选。真机验收待做。**环境**：Electron 33.4.11 在本机初始化崩溃（0xC0000005），夹具验证用 Electron 31.7.7（AITI_ELECTRON），见规格 §6 |
 | BASELINE-000 | [当前基线](000-baseline.md) | 接管现状 | observed | 从当前提交核对，不补造历史 TDD |
 | SPEC-030 | [sqlite 监控的长回合活信号与等待态](030-workbuddy-long-turn-liveness.md) | bugfix（状态判定） | done | WorkBuddy 长回合 `last_activity_at` 不推进 → 120s 窗口误判灰；新鲜度改用 `MAX(last_activity_at, updated_at)` + 窗口 600s + `pending` 计入等待；Red 3 failed → Green 38；全量 937；2026-10-23 用户确认 |
 | SPEC-029 | [点击 web 任务时恢复最小化的浏览器窗口](029-restore-minimized-chrome-window.md) | bugfix（交互/窗口恢复） | done | 扩展只 `focused:true` 不还原最小化窗口 → 点 dsh-web 只亮任务栏图标；Red 1 failed/Green 4 passed，扩展 1.1.2；全量 932；2026-10-23 用户重载扩展后确认 |
@@ -40,8 +49,9 @@
 
 ## 下一轮候选（尚未安排实现）
 
-1. ~~dsh 端口自动跟随~~：已由 SPEC-005 落地（`authority: auto`）；可优化点见该规格"已知限制"（发现耗时 15~20 秒）。
-2. ~~简单 todo 功能~~：已由 [SPEC-024](024-goals.md) 落地为「目标清单」；悬浮灯展示由 [SPEC-025](025-overlay-goals-row.md) 落地，两者均已真机确认通过。
-3. lockfile 与 CI 仍为后续候选；JSON 导入/导出与窗口位置记忆未实现（见 SPEC-024 非目标）。
+1. **[SPEC-038 目标窗口 keyed 增量渲染](038-goals-keyed-rendering.md)（ready，设计已定案）**：用户 2026-10-25 拍板"下个会话再做"——按该规格 §4 切片直接开工，SPEC-031 断言即特征测试。
+2. ~~dsh 端口自动跟随~~：已由 SPEC-005 落地（`authority: auto`）；可优化点见该规格"已知限制"（发现耗时 15~20 秒）。
+3. ~~简单 todo 功能~~：已由 [SPEC-024](024-goals.md) 落地为「目标清单」；悬浮灯展示由 [SPEC-025](025-overlay-goals-row.md) 落地，两者均已真机确认通过。
+4. lockfile 与 CI 仍为后续候选；JSON 导入/导出与窗口位置记忆未实现（见 SPEC-024 非目标）。
 
 后续功能需求沿用现有监控和窗口能力，不自动执行旧 `05-NEXT-PROMPT` 中曾提议的 `type: http`。
