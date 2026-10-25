@@ -368,6 +368,49 @@ async function checkGoalsInputPreservation(theme) {
       })()`);
     });
 
+    // SPEC-038/AC-01：推送前后卡片与时间线输入框必须是同一节点（keyed 复用锚）。
+    // 节点身份是 IME 组合、选区、armed 等浏览器内部态存活的充分载体；
+    // 现实现整树重建，身份必然变化——这就是本重构的特征 Red。
+    await step('SPEC-038/AC-01 卡片与输入框节点身份', async () => {
+      await win.webContents.executeJavaScript(`(() => {
+        const card = document.querySelector('.goal');
+        window.__spec038Card = card;
+        window.__spec038Input = card?.querySelector('.entry-input') ?? null;
+      })()`);
+      await push(p => { p.goals.find(g => g.id === 'g1').entries.push({ id: 'e7', at: Date.now(), kind: 'progress', text: '身份断言推送的新记录' }); });
+      const identity = await win.webContents.executeJavaScript(`(() => {
+        const card = document.querySelector('.goal');
+        const input = card?.querySelector('.entry-input');
+        return {
+          sameCard: !!card && card.isSameNode(window.__spec038Card),
+          sameInput: !!input && input.isSameNode(window.__spec038Input),
+          pushedEntry: [...document.querySelectorAll('.entry-text')].some(n => n.textContent === '身份断言推送的新记录'),
+        };
+      })()`);
+      assert.equal(identity.sameCard, true, '推送后卡片节点被重建（身份变化）');
+      assert.equal(identity.sameInput, true, '推送后时间线输入框被重建');
+      assert.equal(identity.pushedEntry, true, '推送数据未渲染');
+    });
+
+    // SPEC-038/AC-02：armed 删除确认态在推送后保持——现状会被全量重绘重置。
+    // 只点击一次进入确认态，绝不再点第二次（那会真的执行删除）。
+    await step('SPEC-038/AC-02 armed 删除确认态保持', async () => {
+      const pre = await win.webContents.executeJavaScript(`(() => {
+        const btn = document.querySelector('.entry-delete');
+        if (!btn) return null;
+        btn.click();
+        return { armed: btn.dataset.armed === '1', label: btn.textContent };
+      })()`);
+      assert.equal(pre?.armed ?? false, true, '夹具前置失败：删除按钮未进入确认态');
+      await push(() => undefined);
+      const armed = await win.webContents.executeJavaScript(`(() => {
+        const btn = document.querySelector('.entry-delete');
+        return { armed: btn?.dataset.armed === '1', label: btn?.textContent ?? null };
+      })()`);
+      assert.equal(armed.armed, true, '推送重置了删除确认态');
+      assert.equal(armed.label, '确认', '确认态按钮文案被重置');
+    });
+
     await step('AC-04 提交失败伴随推送时草稿保留', async () => {
       await win.webContents.executeJavaScript(`(() => {
         const input = document.querySelector('.entry-input');

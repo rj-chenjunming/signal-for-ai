@@ -5,7 +5,7 @@
 | Spec ID | 文档 | 类型 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
 | SPEC-039 | [Electron 升级 33 → 34.5.8（含仓库 ACL 解毒）](039-electron-34-upgrade.md) | chore（依赖/环境） | done | **根因修正**：非版本问题——仓库根被沙箱工具写入 `Everyone DENY(DC)` + 低完整性标签，任何 Electron 在此目录沙箱初始化即崩（SPEC-031 §6 的版本结论被推翻）；ACL 已备份并解毒。pin 升 34.5.8 后全量 952/952、夹具回到 pin 版全过。真机双击启动待用户确认 |
-| SPEC-038 | [目标窗口 keyed 增量渲染](038-goals-keyed-rendering.md) | refactor（纯重构） | ready | 设计定案待执行：卡片按 goal.id 复用（IME/选区/armed 确认天然存活），快照逻辑缩减为滚动；SPEC-031 断言全部保留为特征测试。本会话主动收口（见规格 §6） |
+| SPEC-038 | [目标窗口 keyed 增量渲染](038-goals-keyed-rendering.md) | refactor（纯重构） | done | 已落地：卡片按 goal.id 缓存复用（节点身份断言过）、armed 删除确认态推送下保持、SPEC-031 快照机制退役为仅滚动位置；SPEC-031 断言原样全过，全量 952/952（Electron 34.5.8）。真机 IME 组合不中断 2026-10-25 用户确认通过 |
 | SPEC-037 | [焦点 worker 承载枚举/隐藏查询/原生恢复](037-focus-worker-remaining-ops.md) | refactor（性能/架构） | done | refreshWindows/findHiddenWindow/revealNativeWindow 全部 worker 优先（脚本预编译一次），解析函数共享、失败回落 spawn；stdin 非 ASCII 统一 \uXXXX 转义。真实 worker enumerate/hidden 只读集成通过；全量 952/952。真机时延对比待做 |
 | SPEC-036 | [常驻 PowerShell 焦点 worker（激活路径）](036-focus-worker-activate.md) | refactor（性能/架构） | done | activate 走常驻 worker（C# 预编译一次，stdio JSON-lines），失败无条件回落按次 spawn；真实 PowerShell ping 集成通过；既有 focus 84 项零改动。枚举/隐藏/恢复 op 迁移留 SPEC-037。真机时延对比待做 |
 | SPEC-035 | [渲染层共享助手收敛（shared-ui.ts）](035-renderer-shared-helpers.md) | refactor（纯重构） | done | `window.aiUi = { statusLabel, formatTime, el }` 单点承载口径，三窗口删本地副本；特征锚先行（原代码通过）后重构；全量 939/939、check:ui/check:goals/smoke 0。真机/Electron 33 复核同 SPEC-031 挂起 |
@@ -49,9 +49,10 @@
 
 ## 下一轮候选（尚未安排实现）
 
-1. **[SPEC-038 目标窗口 keyed 增量渲染](038-goals-keyed-rendering.md)（ready，设计已定案）**：用户 2026-10-25 拍板"下个会话再做"——按该规格 §4 切片直接开工，SPEC-031 断言即特征测试。
+1. ~~[SPEC-038 目标窗口 keyed 增量渲染](038-goals-keyed-rendering.md)~~：已落地（done，2026-10-25 真机 IME 组合确认通过）。
 2. ~~dsh 端口自动跟随~~：已由 SPEC-005 落地（`authority: auto`）；可优化点见该规格"已知限制"（发现耗时 15~20 秒）。
 3. ~~简单 todo 功能~~：已由 [SPEC-024](024-goals.md) 落地为「目标清单」；悬浮灯展示由 [SPEC-025](025-overlay-goals-row.md) 落地，两者均已真机确认通过。
 4. lockfile 与 CI 仍为后续候选；JSON 导入/导出与窗口位置记忆未实现（见 SPEC-024 非目标）。
+5. 排查 2026-10-20/21 期间往项目目录写毒性 ACL 的沙箱类软件，确认其它项目目录是否同样中招（背景见 [SPEC-039](039-electron-34-upgrade.md) §6）。
 
 后续功能需求沿用现有监控和窗口能力，不自动执行旧 `05-NEXT-PROMPT` 中曾提议的 `type: http`。
