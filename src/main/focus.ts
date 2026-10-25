@@ -840,6 +840,12 @@ export class FocusService {
         // 可见时若走 Win32 的 SW_MINIMIZE→SW_RESTORE，会复现 SPEC-014 的
         // “恢复后 X 无法关闭”回归；handoff 是 dsh 认可的恢复路径。
         if (isDsh) return this.revealNativeWindow(candidate, 'dsh');
+        // SPEC-042：ZCode 与 dsh 同根因同口径——Win32 最小化往返会破坏 Electron
+        // 窗口的 X 关闭；ZCode 桌面端具备 requestSingleInstanceLock（asar 已验证），
+        // visible/minimized/hidden 一律走自身单实例接力。
+        if (declaredProcessNames.includes(name) && name === 'zcode' && task.monitor.type === 'zcode') {
+          return this.revealNativeWindow(candidate, 'zcode');
+        }
         const useNative = declaredProcessNames.includes(name) &&
           (terminal.type === 'windowProcess' || fromHidden);
         if (useNative && name === 'workbuddy') return this.revealNativeWindow(candidate, 'workbuddy');

@@ -1,6 +1,9 @@
 export const NATIVE_WINDOW_APPS = {
   dsh: { label: 'dsh', processName: 'DeepSeek Harness', executableName: 'DeepSeek Harness.exe', marker: 'LAMPDSHREVEAL ok=True' },
   workbuddy: { label: 'WorkBuddy', processName: 'WorkBuddy', executableName: 'WorkBuddy.exe', marker: 'LAMPWORKBUDDYREVEAL ok=True' },
+  // SPEC-042：ZCode 桌面端（Electron）。app.asar 已验证 requestSingleInstanceLock，
+  // 与 dsh 同走"重新拉起 exe → second-instance 原生恢复"，绝不做 SW_MINIMIZE 往返。
+  zcode: { label: 'ZCode', processName: 'ZCode', executableName: 'ZCode.exe', marker: 'LAMPZCODEREVEAL ok=True' },
 } as const;
 export type NativeWindowApp = keyof typeof NATIVE_WINDOW_APPS;
 

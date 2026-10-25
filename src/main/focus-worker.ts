@@ -137,6 +137,7 @@ export const FOCUS_WORKER_SCRIPT = [
   '  $profiles = @{',
   "    dsh = @{ label = 'dsh'; processName = 'DeepSeek Harness'; executableName = 'DeepSeek Harness.exe'; marker = 'LAMPDSHREVEAL ok=True' }",
   "    workbuddy = @{ label = 'WorkBuddy'; processName = 'WorkBuddy'; executableName = 'WorkBuddy.exe'; marker = 'LAMPWORKBUDDYREVEAL ok=True' }",
+  "    zcode = @{ label = 'ZCode'; processName = 'ZCode'; executableName = 'ZCode.exe'; marker = 'LAMPZCODEREVEAL ok=True' }",
   '  }',
   '  $profile = $profiles[$appKey]',
   "  if ($null -eq $profile) { throw 'Unsupported native window application' }",
