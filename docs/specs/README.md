@@ -4,6 +4,7 @@
 
 | Spec ID | 文档 | 类型 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
+| SPEC-043 | [ZCode 流式思考期不亮蓝灯（输入/part 落库时机修正）](043-zcode-thinking-window.md) | bugfix（状态判定） | verifying | 探针证实 model_usage 全部完成后才落库、流式输出期间无开放行 → 灯只在工具执行几秒闪蓝。修法：running 增加未收尾输入信号（session_input 晚于最近收尾回合）+ part 活动新鲜度护栏；只查元数据列。Red 1 failed → 20/20、全量 985/985、build/smoke 0；23:56 已重启生效。**真机验收待用户（干活持续蓝灯）** |
 | SPEC-042 | [ZCode 点击恢复后 X 无法关闭（单实例接力修复）](042-zcode-close-after-focus.md) | bugfix（回归/交互） | done | 与 SPEC-023 同根因（Win32 SW_MINIMIZE→SW_RESTORE 往返破坏 Electron 关闭）；zcode 窗口目标一律走自身单实例接力（asar 已验证 requestSingleInstanceLock）。Red 10 failed → 焦点族 121/121、全量 982/982、build/smoke 0；23:44 重启到新构建。**2026-10-25 用户真机确认「可以了」** |
 | SPEC-041 | [ZCode 状态接入指示灯（SQLite 只读轮询 + 裸 Z 图标）](041-zcode-monitor.md) | feature（新监控源/显示元数据） | done | 新 `monitor.type: zcode` 只读轮询 `~/.zcode/cli/db/db.sqlite`（子进程 node:sqlite 只取元数据列，不读正文）：开放 model/tool 行判 running、approval pending 判 waiting、收尾回合判 success/failed（cancelled→idle）、确认水位防复亮；`toolKind: 'zcode'` 裸 Z 图标（用户三选一定案）；SPEC-017 闸门加 zcode。Red 16+1+1 → Green 全量 972/972、smoke/check:ui/check:goals 0；黄灯本机 yolo 模式可能不触发（预期，逻辑已备）。**2026-10-25 用户真机确认「可以了」**；验收中发现的点击恢复缺陷转 SPEC-042 |
 | SPEC-040 | [只监控一个工具时也显示该工具的图标](040-single-tool-icon.md) | bugfix（显示形态） | done | 灯带阈值 ≥2 → ≥1：1 个可见任务也渲染「总灯+图标行」，单灯保留给 0 行；forceStrip 参数删除。Red 8 failed→Green 92/92；check:ui 35 场景；全量 950/951（+1 项既有 process-presence-io 抖动，已对照 HEAD 披露）。**2026-10-25 用户真机确认「没问题」** |

@@ -32,6 +32,8 @@ async function seedDb(seed: (db: DatabaseSync) => void, fileOverride?: string): 
     CREATE TABLE tool_usage (id TEXT PRIMARY KEY, session_id TEXT, status TEXT, approval_status TEXT, started_at INTEGER, completed_at INTEGER);
     CREATE TABLE model_usage (id TEXT PRIMARY KEY, session_id TEXT, status TEXT, started_at INTEGER, completed_at INTEGER);
     CREATE TABLE turn_usage (session_id TEXT, turn_id TEXT, status TEXT, started_at INTEGER, completed_at INTEGER, error_type TEXT, cancelled_by_user INTEGER);
+    CREATE TABLE session_input (id TEXT PRIMARY KEY, session_id TEXT, kind TEXT, payload TEXT, time_created INTEGER);
+    CREATE TABLE part (id TEXT PRIMARY KEY, session_id TEXT, data TEXT, time_created INTEGER);
   `);
   seed(db);
   db.close();
@@ -67,6 +69,18 @@ const turn = (
   db
     .prepare('INSERT INTO turn_usage (session_id, turn_id, status, started_at, completed_at, error_type, cancelled_by_user) VALUES (?, ?, ?, ?, ?, ?, 0)')
     .run(sessionId, `tn-${++seq}`, o.status, o.startedAt ?? (o.completedAt ?? now) - 1000, o.completedAt ?? now, o.errorType ?? null);
+
+/** SPEC-043：提示词输入行（真实库在提交时刻即落库；payload 正文列不查询）。 */
+const input = (db: DatabaseSync, sessionId: string, o: { timeCreated?: number; kind?: string } = {}) =>
+  db
+    .prepare('INSERT INTO session_input (id, session_id, kind, payload, time_created) VALUES (?, ?, ?, NULL, ?)')
+    .run(`si-${++seq}`, sessionId, o.kind ?? 'sendText', o.timeCreated ?? now);
+
+/** SPEC-043：part 行（流式输出期间持续落库；data 正文列不查询）。 */
+const part = (db: DatabaseSync, sessionId: string, o: { timeCreated?: number } = {}) =>
+  db
+    .prepare('INSERT INTO part (id, session_id, data, time_created) VALUES (?, ?, NULL, ?)')
+    .run(`pt-${++seq}`, sessionId, o.timeCreated ?? now);
 
 function fixture(dbPath: string, overrides: Partial<ZCodeMonitorConfig> = {}) {
   const events: MonitorEvent[] = [];
@@ -176,6 +190,42 @@ describe('SPEC-041 ZCode 会话库状态判定', () => {
   it('活跃会话但无开放行也无新收尾回合时判 idle', async () => {
     const file = await seedDb(db => {
       session(db, 's1', { directory: 'C:\\Work\\Alpha', timeUpdated: now });
+    });
+    const f = fixture(file);
+    await f.monitor.start();
+    expect(f.status()).toBe('idle');
+  });
+
+  it('SPEC-043/AC-01: 提示词已提交且回合未收尾判 running（流式思考期）', async () => {
+    const file = await seedDb(db => {
+      session(db, 's1', { directory: 'C:\\Work\\Alpha' });
+      turn(db, 's1', { status: 'completed', completedAt: now - 120000 });
+      input(db, 's1', { timeCreated: now - 30000 });
+      part(db, 's1', { timeCreated: now - 1000 });
+    });
+    const f = fixture(file);
+    await f.monitor.start();
+    expect(f.status()).toBe('running');
+  });
+
+  it('SPEC-043/AC-02: 回合收尾行晚于最后输入不再判 running（绿灯不被顶成蓝）', async () => {
+    const file = await seedDb(db => {
+      session(db, 's1', { directory: 'C:\\Work\\Alpha', lastOutcome: 'completed' });
+      input(db, 's1', { timeCreated: now - 60000 });
+      part(db, 's1', { timeCreated: now - 1000 });
+      turn(db, 's1', { status: 'completed', completedAt: now });
+    });
+    const f = fixture(file);
+    await f.monitor.start();
+    expect(f.status()).toBe('success');
+  });
+
+  it('SPEC-043/AC-03: 输入未收尾但活动超出新鲜窗判 idle（崩溃残留保护）', async () => {
+    const file = await seedDb(db => {
+      session(db, 's1', { directory: 'C:\\Work\\Alpha' });
+      turn(db, 's1', { status: 'completed', completedAt: now - 1800000 });
+      input(db, 's1', { timeCreated: now - 1200000 });
+      part(db, 's1', { timeCreated: now - 1200000 });
     });
     const f = fixture(file);
     await f.monitor.start();

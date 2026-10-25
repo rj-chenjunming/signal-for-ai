@@ -64,12 +64,26 @@ export interface ZcodeTurnRow {
   readonly errorType: string | null;
 }
 
+/** SPEC-043：提示词输入行（提交时刻落库）；payload 正文列不查询。 */
+export interface ZcodeInputRow {
+  readonly sessionId: string;
+  readonly timeCreated: number;
+}
+
+/** SPEC-043：part 行（流式输出期间持续落库）；data 正文列不查询。 */
+export interface ZcodePartRow {
+  readonly sessionId: string;
+  readonly timeCreated: number;
+}
+
 /** 单轮查询的完整快照。 */
 export interface ZcodeProbe {
   readonly sessions: readonly ZcodeSessionRow[];
   readonly openModels: readonly ZcodeOpenRow[];
   readonly openTools: readonly ZcodeOpenRow[];
   readonly turns: readonly ZcodeTurnRow[];
+  readonly inputs: readonly ZcodeInputRow[];
+  readonly parts: readonly ZcodePartRow[];
 }
 
 export interface ZcodeVerdict {
@@ -100,15 +114,18 @@ function matchesProjects(session: ZcodeSessionRow, projects: readonly string[]):
  *
  *   waiting  = 开放工具行 approval_status ∉ {NULL,'none'}。等待授权不受新鲜窗约束
  *              （用户可以离开很久）；孤儿行由 store 的 waiting_timeout 兜底转 failed。
- *   running  = 开放 model/tool 行且 started_at 在新鲜窗内（未来时间戳视为时钟偏移丢弃）。
+ *   running  = ①开放 model/tool 行且 started_at 在新鲜窗内（未来时间戳视为时钟偏移丢弃）；
+ *             ②SPEC-043 未收尾输入：session_input 晚于该会话最近收尾回合（提示词已提交、
+ *               回合未结束——探针证实 model_usage 全部完成后才落库，流式思考期没有开放行），
+ *               且活动（输入/part 落库/开放行）在新鲜窗内（防应用崩溃后永久亮蓝）。
  *   failed   = 最近收尾回合 status='error'（受启动基线约束，不重放历史失败）。
  *   success  = 最近收尾回合 status='completed' 且 completedAt > max(已确认水位, 启动基线)，
  *              completionAt = completedAt（store 的确认闸门防复亮）。
  *   idle     = 其余（含 cancelled 回合：用户主动中止，同 Codex turn_aborted 口径）。
  *
  * 刻意**不使用** `session.time_updated > 最近回合完成时刻` 之类推断 running：
- * 标题生成等收尾写库会把刚完成的会话误翻蓝（绿灯闪蓝）；流式间隙由
- * model_usage 开放行覆盖，无需推断。
+ * 标题生成等收尾写库会把刚完成的会话误翻蓝（绿灯闪蓝）；未收尾输入与收尾行的
+ * 先后关系是回合边界的精确等价物（收尾行在回合结束时写，晚于最后输入）。
  */
 export function deriveZcodeVerdict(
   probe: ZcodeProbe,
@@ -131,6 +148,8 @@ export function deriveZcodeVerdict(
   const openTools = inScope(probe.openTools);
   const openModels = inScope(probe.openModels);
   const turns = inScope(probe.turns);
+  const inputs = inScope(probe.inputs);
+  const parts = inScope(probe.parts);
 
   const awaiting = openTools.filter(
     row => typeof row.approvalStatus === 'string' && row.approvalStatus.length > 0 && row.approvalStatus !== 'none',
@@ -144,6 +163,33 @@ export function deriveZcodeVerdict(
   );
   if (liveOpen.length > 0) {
     return { status: 'running', message: `${liveOpen.length} 个 ZCode 会话执行中` };
+  }
+
+  // SPEC-043：未收尾输入 = 提示词已提交但回合收尾行还没写（收尾行晚于最后输入即已结束）。
+  let latestInputAt = 0;
+  for (const row of inputs) {
+    if (row.timeCreated > latestInputAt) latestInputAt = row.timeCreated;
+  }
+  if (latestInputAt > 0) {
+    let settledAt = 0;
+    for (const row of turns) {
+      if (row.completedAt > settledAt) settledAt = row.completedAt;
+    }
+    if (latestInputAt > settledAt && latestInputAt <= opts.now) {
+      let latestActivity = latestInputAt;
+      for (const row of parts) {
+        if (row.timeCreated > latestActivity && row.timeCreated <= opts.now) latestActivity = row.timeCreated;
+      }
+      for (const row of openTools) {
+        if (row.startedAt > latestActivity && row.startedAt <= opts.now) latestActivity = row.startedAt;
+      }
+      for (const row of openModels) {
+        if (row.startedAt > latestActivity && row.startedAt <= opts.now) latestActivity = row.startedAt;
+      }
+      if (opts.now - latestActivity <= opts.activeWithinMs) {
+        return { status: 'running', message: 'ZCode 回合执行中（含流式输出）' };
+      }
+    }
   }
 
   let latest: ZcodeTurnRow | undefined;
@@ -179,8 +225,10 @@ export function buildZcodeQueryScript(database: string): string {
     `const openModels = all("SELECT session_id AS sessionId, started_at AS startedAt, NULL AS approvalStatus FROM model_usage WHERE completed_at IS NULL ORDER BY started_at DESC LIMIT ${LIMIT_OPEN}");`,
     `const openTools = all("SELECT session_id AS sessionId, started_at AS startedAt, approval_status AS approvalStatus FROM tool_usage WHERE completed_at IS NULL ORDER BY started_at DESC LIMIT ${LIMIT_OPEN}");`,
     `const turns = all("SELECT session_id AS sessionId, status, started_at AS startedAt, completed_at AS completedAt, error_type AS errorType FROM turn_usage WHERE completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT ${LIMIT_TURNS}");`,
+    `const inputs = all("SELECT session_id AS sessionId, time_created AS timeCreated FROM session_input ORDER BY time_created DESC LIMIT ${LIMIT_OPEN}");`,
+    `const parts = all("SELECT session_id AS sessionId, time_created AS timeCreated FROM part ORDER BY time_created DESC LIMIT ${LIMIT_OPEN}");`,
     'db.close();',
-    'process.stdout.write(JSON.stringify({ sessions, openModels, openTools, turns }));',
+    'process.stdout.write(JSON.stringify({ sessions, openModels, openTools, turns, inputs, parts }));',
   ].join('\n');
 }
 
@@ -221,6 +269,14 @@ function parseProbe(stdout: string): ZcodeProbe {
       startedAt: asNumber(row['startedAt']),
       completedAt: asNumber(row['completedAt']),
       errorType: asString(row['errorType']),
+    })),
+    inputs: rows('inputs').map(row => ({
+      sessionId: String(row['sessionId'] ?? ''),
+      timeCreated: asNumber(row['timeCreated']),
+    })),
+    parts: rows('parts').map(row => ({
+      sessionId: String(row['sessionId'] ?? ''),
+      timeCreated: asNumber(row['timeCreated']),
     })),
   };
 }
