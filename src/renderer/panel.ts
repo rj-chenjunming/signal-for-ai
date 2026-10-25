@@ -26,6 +26,8 @@
 (() => {
 
 const api = window.aiIndicator;
+// SPEC-035：共享助手由 shared-ui.js 提供（本页 HTML 已先于本脚本加载）。
+const ui = window.aiUi!;
 
 const listEl = document.getElementById('panel-list') as HTMLDivElement;
 const emptyEl = document.getElementById('panel-empty') as HTMLDivElement;
@@ -41,15 +43,16 @@ const btnGoals = document.getElementById('btn-goals') as HTMLButtonElement;
 // SPEC-025：目标入口使用与悬浮灯一致的目标图标（本地固定 SVG）。
 btnGoals.innerHTML = window.aiIndicatorUi?.icon('goals') ?? '◎';
 
-/** 状态视觉元数据 —— 色值一律走 CSS 变量，真实色由 shared/constants.ts 定义（架构 §8.1）。 */
-const STATUS_VISUAL: Record<AiTaskStatus, { colorVar: string; icon: string; label: string }> = {
-  idle: { colorVar: '--status-idle', icon: '○', label: '空闲' },
-  starting: { colorVar: '--status-starting', icon: '◌', label: '启动中' },
-  running: { colorVar: '--status-running', icon: '▶', label: '运行中' },
-  waiting: { colorVar: '--status-waiting', icon: '⏸', label: '等待授权' },
-  success: { colorVar: '--status-success', icon: '✓', label: '已完成' },
-  failed: { colorVar: '--status-failed', icon: '✕', label: '失败' },
-  unknown: { colorVar: '--status-unknown', icon: '?', label: '失联' },
+/** 状态视觉元数据 —— 色值一律走 CSS 变量，真实色由 shared/constants.ts 定义（架构 §8.1）。
+ *  文案统一走共享 statusLabel（SPEC-035），此处不再各存一份 label。 */
+const STATUS_VISUAL: Record<AiTaskStatus, { colorVar: string; icon: string }> = {
+  idle: { colorVar: '--status-idle', icon: '○' },
+  starting: { colorVar: '--status-starting', icon: '◌' },
+  running: { colorVar: '--status-running', icon: '▶' },
+  waiting: { colorVar: '--status-waiting', icon: '⏸' },
+  success: { colorVar: '--status-success', icon: '✓' },
+  failed: { colorVar: '--status-failed', icon: '✕' },
+  unknown: { colorVar: '--status-unknown', icon: '?' },
 };
 
 /** 主动作常显，次要动作收进 details；可点区域 >= 32 DIP。 */
@@ -221,13 +224,13 @@ function updateRow(row: HTMLElement, task: AiTaskState): void {
   const elapsed = row.querySelector('.task-elapsed') as HTMLSpanElement;
   statusLabel.style.color = `var(${visual.colorVar})`;
   if (task.status === 'success' || task.status === 'failed') {
-    statusLabel.textContent = `${visual.label} · `;
+    statusLabel.textContent = `${ui.statusLabel(task.status)} · `;
     elapsed.textContent = task.durationMs ? formatDuration(task.durationMs) : '';
   } else if (task.status === 'running' && task.startedAt) {
-    statusLabel.textContent = `${visual.label} · `;
+    statusLabel.textContent = `${ui.statusLabel(task.status)} · `;
     elapsed.textContent = formatDuration(Date.now() - task.startedAt);
   } else {
-    statusLabel.textContent = visual.label;
+    statusLabel.textContent = ui.statusLabel(task.status);
     elapsed.textContent = '';
   }
 

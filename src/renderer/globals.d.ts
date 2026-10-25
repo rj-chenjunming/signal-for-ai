@@ -44,6 +44,21 @@ interface AiIndicatorAudio {
   isAudioAvailable: () => boolean;
 }
 
+/**
+ * 渲染层共享助手（SPEC-035，shared-ui.ts 挂载）。
+ * 三张 HTML 在窗口脚本之前以 classic script 加载 shared-ui.js；窗口文件
+ * 按脚本标签顺序可以直接解构（缺失属于接线错误，由 check:ui 三页断言捕获）。
+ */
+interface AiUiHelpers {
+  statusLabel: (status: TaskStatus) => string;
+  formatTime: (at: number) => string;
+  el: <K extends keyof HTMLElementTagNameMap>(
+    tag: K,
+    className?: string,
+    text?: string,
+  ) => HTMLElementTagNameMap[K];
+}
+
 declare global {
   interface Window {
     aiIndicatorUi?: { icon: (kind: string) => string };
@@ -51,6 +66,8 @@ declare global {
     aiIndicator?: RendererApi;
     /** audio.js 挂载的音效接口。 */
     aiIndicatorAudio?: AiIndicatorAudio;
+    /** SPEC-035：shared-ui.js 挂载的共享助手。 */
+    aiUi?: AiUiHelpers;
   }
 
   /**
