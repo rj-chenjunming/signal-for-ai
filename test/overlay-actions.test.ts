@@ -23,6 +23,7 @@ class Element {
   };
   appendChild(child: Element) { this.children.push(child); }
   setAttribute() { /* Accessible labels do not change the action under test. */ }
+  removeAttribute() { /* SPEC-032 跳转态解除与 setAttribute 对称；本测试只断言动作序列。 */ }
   replaceChildren() { this.children = []; }
   remove() { /* 行移除不是本测试目标 */ }
   addEventListener(name: string, callback: () => void) { this.listeners.set(name, callback); }
@@ -53,6 +54,8 @@ async function fixture(failure?: 'result' | 'reject', feedbackFailure = false) {
     window: {
       setTimeout: vi.fn(() => 1), clearTimeout: vi.fn(), addEventListener: vi.fn(),
       aiIndicator: { getSnapshot: async () => store.getSnapshot(), onSnapshot: (fn: typeof onSnapshot) => { onSnapshot = fn; }, onToast: (fn: typeof onToast) => { onToast = fn; }, onLayout: vi.fn(), onPlaySound: vi.fn(), sendTaskAction: send, showPanelMessage: feedback },
+      // SPEC-035：共享助手替身（overlay.ts 加载即解构 window.aiUi）。
+      aiUi: { statusLabel: (status: string) => ({ idle: '空闲', starting: '启动中', running: '运行中', waiting: '等待授权', success: '已完成', failed: '失败', unknown: '失联' } as Record<string, string>)[status] ?? '空闲' },
     }, console,
   });
   await settle();

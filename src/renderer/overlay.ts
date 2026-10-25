@@ -31,6 +31,8 @@
 (() => {
 
 const api = window.aiIndicator;
+// SPEC-035：共享助手由 shared-ui.js 提供（本页 HTML 已先于本脚本加载）。
+const ui = window.aiUi!;
 
 const lampDot = document.getElementById('lamp-dot') as HTMLDivElement;
 const lampBadge = document.getElementById('lamp-badge') as HTMLDivElement;
@@ -210,7 +212,7 @@ function renderStripMode(snapshot: AiSnapshot): void {
   // 总灯 = 所有端口的聚合态
   applyStatusColorTo(stripMasterDot, snapshot.aggregate);
   applyAnimationTo(stripMasterDot, snapshot.aggregate);
-  stripMasterLabel.textContent = statusLabel(snapshot.aggregate);
+  stripMasterLabel.textContent = ui.statusLabel(snapshot.aggregate);
   if (snapshot.runningCount > 0) {
     stripMasterBadge.hidden = false;
     stripMasterBadge.textContent =
@@ -280,29 +282,66 @@ function renderStripMode(snapshot: AiSnapshot): void {
       // ackedCompletionAt，于是监控之后每轮读到的同一个完成事件都会被
       // 丢弃 —— 这正是"点掉之后绿灯不会立刻复亮"的关键。
       //
-      // 两条动作各自独立发出（互不阻塞）
-      const send = (action: 'focus_terminal' | 'mark_read'): void => {
-        void api?.sendTaskAction({ taskId: task.taskId, action }).then((result) => {
-          if (!result.ok) void showActionError(result.message ?? '操作未完成，请从面板重试');
-        }).catch(() => { void showActionError('操作失败，请从面板查看或重试'); });
+      // 两条动作各自独立发出（互不阻塞）；返回 promise 供跳转态跟踪。
+      const send = (action: 'focus_terminal' | 'mark_read'): Promise<void> => {
+        const request = api?.sendTaskAction({ taskId: task.taskId, action });
+        if (!request) {
+          return Promise.resolve();
+        }
+        return request
+          .then((result) => {
+            if (!result.ok) void showActionError(result.message ?? '操作未完成，请从面板重试');
+          })
+          .catch(() => {
+            void showActionError('操作失败，请从面板查看或重试');
+          });
       };
 
-      // ⚠️ 「是否完成态」必须在**点击那一刻**读，不能捕获创建时的 task.status。
-      //
-      // 【实测踩到的坑】`stripRowCache` 会复用行节点，所以这个闭包只在
-      // **首次创建**时求值一次。若写成 `const wasDone = task.status === 'success'`，
-      // 那么这一行第一次出现时是 idle，`wasDone` 就永远是 false ——
-      // 于是无论怎么点都**不会发 mark_read**，绿灯永远不熄。
-      // 我的 verify-ack-click.mjs 正是靠这个断言抓出来的。
-      //
-      // 改成从 DOM 上读：`renderStripMode` 每轮都会同步
-      // `entry.row.dataset['status']`，所以它总是最新值。
+      // SPEC-032：点击后**同步**进入"跳转中"过渡态——主进程确认前台需要 ~2s
+      // （PowerShell + Add-Type 固定开销，见 SPEC-022），期间没有任何视觉确认，
+      // 用户会把"没反应"误读为"没点上"而连点。该行的全部请求结算后解除；
+      // 重复点击由行内 token 幂等，8s 保护窗防止 IPC 挂死时行永久滞留。
+      let jumpToken = 0;
       row.addEventListener('click', () => {
         if (!api) return;
-        // 先跳转、再熄灭。两条请求各自独立发出（互不阻塞）。
-        send('focus_terminal');
+        const token = ++jumpToken;
+        row.classList.add('is-jumping');
+        row.setAttribute('aria-busy', 'true');
+        let pendingCount = 0;
+        let guard: number | null = null;
+        const finish = (): void => {
+          if (guard !== null) {
+            window.clearTimeout(guard);
+            guard = null;
+          }
+          if (token !== jumpToken || pendingCount > 0) return;
+          row.classList.remove('is-jumping');
+          row.removeAttribute('aria-busy');
+        };
+        guard = window.setTimeout(() => {
+          pendingCount = 0;
+          finish();
+        }, 8000);
+        const track = (request: Promise<void>): void => {
+          pendingCount += 1;
+          void request.then(() => {
+            pendingCount -= 1;
+            finish();
+          });
+        };
+        track(send('focus_terminal'));
+        // ⚠️ 「是否完成态」必须在**点击那一刻**读，不能捕获创建时的 task.status。
+        //
+        // 【实测踩到的坑】`stripRowCache` 会复用行节点，所以这个闭包只在
+        // **首次创建**时求值一次。若写成 `const wasDone = task.status === 'success'`，
+        // 那么这一行第一次出现时是 idle，`wasDone` 就永远是 false ——
+        // 于是无论怎么点都**不会发 mark_read**，绿灯永远不熄。
+        // 我的 verify-ack-click.mjs 正是靠这个断言抓出来的。
+        //
+        // 改成从 DOM 上读：`renderStripMode` 每轮都会同步
+        // `entry.row.dataset['status']`，所以它总是最新值。
         const now = row.dataset['status'] ?? '';
-        if (now === 'success' || now === 'failed') send('mark_read');
+        if (now === 'success' || now === 'failed') track(send('mark_read'));
       });
 
       entry = { row, dot, port, icon };
@@ -312,7 +351,7 @@ function renderStripMode(snapshot: AiSnapshot): void {
     applyStatusColorTo(entry.dot, task.status);
     applyAnimationTo(entry.dot, task.status);
     entry.row.dataset['status'] = task.status;
-    entry.row.setAttribute('aria-label', `${task.name} · ${statusLabel(task.status)}`);
+    entry.row.setAttribute('aria-label', `${task.name} · ${ui.statusLabel(task.status)}`);
     entry.port.textContent = task.portLabel ?? task.name;
     entry.icon.innerHTML = window.aiIndicatorUi?.icon(task.toolKind ?? 'generic') ?? '';
     // ★ 刻意**不设** `row.title`。
@@ -504,26 +543,6 @@ async function reportPosition(): Promise<void> {
     await api?.notifyLampDragged({ x: window.screenX, y: window.screenY });
   } catch (err) {
     console.warn('[overlay] 上报位置失败', err);
-  }
-}
-
-function statusLabel(status: AiTaskStatus): string {
-  switch (status) {
-    case 'running':
-      return '运行中';
-    case 'waiting':
-      return '等待授权';
-    case 'success':
-      return '已完成';
-    case 'failed':
-      return '失败';
-    case 'starting':
-      return '启动中';
-    case 'unknown':
-      return '失联';
-    case 'idle':
-    default:
-      return '空闲';
   }
 }
 

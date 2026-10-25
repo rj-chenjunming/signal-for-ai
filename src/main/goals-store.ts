@@ -133,7 +133,7 @@ export class GoalsStore {
   }
 
   updateTitle(id: string, title: string): GoalMutationResult {
-    const goal = this.findGoal(id);
+    const goal = this.findLiveGoal(id);
     if (!goal) {
       return { ok: false, message: '目标不存在' };
     }
@@ -148,7 +148,7 @@ export class GoalsStore {
   }
 
   setProgress(id: string, progress: number): GoalMutationResult {
-    const goal = this.findGoal(id);
+    const goal = this.findLiveGoal(id);
     if (!goal) {
       return { ok: false, message: '目标不存在' };
     }
@@ -165,7 +165,7 @@ export class GoalsStore {
   }
 
   complete(id: string): GoalMutationResult {
-    const goal = this.findGoal(id);
+    const goal = this.findLiveGoal(id);
     if (!goal) {
       return { ok: false, message: '目标不存在' };
     }
@@ -196,7 +196,7 @@ export class GoalsStore {
     kind: GoalEntryKind,
     text: string,
   ): GoalMutationResult {
-    const goal = this.findGoal(goalId);
+    const goal = this.findLiveGoal(goalId);
     if (!goal) {
       return { ok: false, message: '目标不存在' };
     }
@@ -218,7 +218,7 @@ export class GoalsStore {
   }
 
   deleteEntry(goalId: string, entryId: string): GoalMutationResult {
-    const goal = this.findGoal(goalId);
+    const goal = this.findLiveGoal(goalId);
     if (!goal) {
       return { ok: false, message: '目标不存在' };
     }
@@ -234,7 +234,7 @@ export class GoalsStore {
 
   /** 同组内拖拽排序（SPEC-026）；beforeId 为 null 表示移到组末。 */
   moveGoal(id: string, beforeId: string | null): GoalMutationResult {
-    const moving = this.findGoal(id);
+    const moving = this.findLiveGoal(id);
     if (!moving) {
       return { ok: false, message: '目标不存在' };
     }
@@ -247,7 +247,7 @@ export class GoalsStore {
       if (beforeId === id) {
         return { ok: false, message: '不能移动到自身' };
       }
-      target = this.findGoal(beforeId);
+      target = this.findLiveGoal(beforeId);
       if (!target) {
         return { ok: false, message: '目标不存在' };
       }
@@ -315,9 +315,29 @@ export class GoalsStore {
     };
   }
 
+  /**
+   * SPEC-034：按 id 定向查询，返回深拷贝（未知 id 返回 undefined）。
+   * 供收件箱导入等"按 id 找一条"的场景使用，替代取全量视图再过滤——
+   * 后者每行一次 structuredClone(全部目标)，行数多时代价线性放大。
+   */
+  findGoal(id: string): Goal | undefined {
+    const goal = this.goals.find((item) => item.id === id);
+    return goal === undefined ? undefined : structuredClone(goal);
+  }
+
+  /** SPEC-034：按标题查询全部匹配，返回深拷贝数组（保持存储顺序）。 */
+  findGoalsByTitle(title: string): Goal[] {
+    return structuredClone(this.goals.filter((item) => item.title === title));
+  }
+
   /* ---------------------------------------------------------------- 内部 */
 
-  private findGoal(id: string): Goal | undefined {
+  /**
+   * 内部专用：返回**活引用**，增删改方法靠它原地修改仓库状态。
+   * 与对外的 findGoal（深拷贝）刻意分开——拷贝语义一旦泄漏到写路径，
+   * 所有变更都会静默丢失（深拷贝版本曾覆盖本方法，测试当场抓住）。
+   */
+  private findLiveGoal(id: string): Goal | undefined {
     return this.goals.find((goal) => goal.id === id);
   }
 
@@ -625,6 +645,8 @@ function parseGoalsFile(content: string): ParseResult {
 
 /** 供测试与窗口复用的时间格式（本地时区，YYYY-MM-DD HH:mm）。 */
 export function formatGoalTime(at: number): string {
+  // SPEC-034：渲染层 goals.ts 的 formatTime 跨年分支与本函数同构
+  // （classic script 约束下两份实现并存，改动必须同步，锚在测试里）。
   const date = new Date(at);
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');

@@ -185,12 +185,13 @@ function applyLine(store: GoalsStore, line: string): LineOutcome {
 
   let goal: Goal | undefined;
   if (goalId) {
-    goal = store.getView().goals.find((item) => item.id === goalId);
+    // SPEC-034：定向查询代替 getView() 全量深拷贝 + 过滤。
+    goal = store.findGoal(goalId);
     if (!goal) {
       return fail(`找不到目标：${goalId}`);
     }
   } else {
-    const matches = store.getView().goals.filter((item) => item.title === goalTitle);
+    const matches = store.findGoalsByTitle(goalTitle);
     if (matches.length === 0) {
       return fail(`找不到目标：${goalTitle}`);
     }

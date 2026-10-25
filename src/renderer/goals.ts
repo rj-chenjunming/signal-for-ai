@@ -16,6 +16,10 @@
 (() => {
   const api = window.aiIndicator;
 
+  // SPEC-035：共享助手由 shared-ui.js 提供（本页 HTML 已先于本脚本加载）；
+  // 缺失说明接线断了，加载即失败比静默降级更容易被夹具与真机发现。
+  const { el, formatTime } = window.aiUi!;
+
   const listEl = document.getElementById('goals-list') as HTMLElement;
   const emptyEl = document.getElementById('goals-empty') as HTMLElement;
   const warningEl = document.getElementById('goals-warning') as HTMLElement;
@@ -39,32 +43,96 @@
   let pendingEntryFocus: string | null = null;
   let draggingGoalId: string | null = null;
 
-  function el<K extends keyof HTMLElementTagNameMap>(
-    tag: K,
-    className?: string,
-    text?: string,
-  ): HTMLElementTagNameMap[K] {
-    const node = document.createElement(tag);
-    if (className) {
-      node.className = className;
-    }
-    if (text !== undefined) {
-      node.textContent = text;
-    }
-    return node;
+  /**
+   * SPEC-031：数据推送会触发全量重绘，而本窗口是备忘录定位——推送到达时
+   * 用户很可能正在输入（goal-sync 约 1 秒轮询一次）。重绘前把"未提交的用户
+   * 输入态"拍快照，换入新树后恢复，保证推送不丢草稿、不丢焦点、不丢滚动。
+   */
+  interface TitleDraft {
+    value: string;
+    caret: { start: number; end: number } | null;
   }
 
-  function formatTime(at: number): string {
-    const date = new Date(at);
-    const now = new Date();
-    const mm = String(date.getMonth() + 1).padStart(2, '0');
-    const dd = String(date.getDate()).padStart(2, '0');
-    const hh = String(date.getHours()).padStart(2, '0');
-    const mi = String(date.getMinutes()).padStart(2, '0');
-    if (date.getFullYear() !== now.getFullYear()) {
-      return `${date.getFullYear()}-${mm}-${dd}`;
+  interface InteractionSnapshot {
+    scrollTop: number;
+    /** 每个目标时间线输入框的非空草稿，按 goalId 键。 */
+    entryDrafts: Map<string, string>;
+    /** 编辑中标题的草稿；editingGoalId 为 null 时必为 null。 */
+    titleDraft: string | null;
+    /** 编辑中标题的光标位置。 */
+    titleCaret: { start: number; end: number } | null;
+    /** 重绘前焦点所在的时间线输入框。 */
+    entryFocus: { goalId: string; start: number; end: number } | null;
+  }
+
+  function cssEscape(value: string): string {
+    return CSS.escape(value);
+  }
+
+  function captureInteraction(): InteractionSnapshot {
+    const entryDrafts = new Map<string, string>();
+    for (const input of Array.from(
+      listEl.querySelectorAll<HTMLInputElement>('input[data-entry-input]'),
+    )) {
+      const goalId = input.dataset.entryInput ?? '';
+      if (goalId !== '' && input.value.length > 0) {
+        entryDrafts.set(goalId, input.value);
+      }
     }
-    return `${mm}/${dd} ${hh}:${mi}`;
+    let titleDraft: string | null = null;
+    let titleCaret: InteractionSnapshot['titleCaret'] = null;
+    if (editingGoalId !== null) {
+      const editor = listEl.querySelector<HTMLInputElement>(
+        `input[data-title-editor="${cssEscape(editingGoalId)}"]`,
+      );
+      if (editor) {
+        titleDraft = editor.value;
+        titleCaret = { start: editor.selectionStart ?? 0, end: editor.selectionEnd ?? 0 };
+      }
+    }
+    let entryFocus: InteractionSnapshot['entryFocus'] = null;
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement && listEl.contains(active)) {
+      const goalId = active.dataset.entryInput ?? '';
+      if (goalId !== '') {
+        entryFocus = {
+          goalId,
+          start: active.selectionStart ?? 0,
+          end: active.selectionEnd ?? 0,
+        };
+      }
+    }
+    return { scrollTop: listEl.scrollTop, entryDrafts, titleDraft, titleCaret, entryFocus };
+  }
+
+  function restoreInteraction(snapshot: InteractionSnapshot): void {
+    for (const [goalId, draft] of snapshot.entryDrafts) {
+      const input = listEl.querySelector<HTMLInputElement>(
+        `input[data-entry-input="${cssEscape(goalId)}"]`,
+      );
+      // 只回填空输入框：提交路径会在结果返回后清空当前输入框，不能被草稿盖回去。
+      if (input && input.value.length === 0) {
+        input.value = draft;
+      }
+    }
+    listEl.scrollTop = snapshot.scrollTop;
+    const focus = snapshot.entryFocus;
+    if (focus) {
+      const input = listEl.querySelector<HTMLInputElement>(
+        `input[data-entry-input="${cssEscape(focus.goalId)}"]`,
+      );
+      if (input) {
+        input.focus();
+        try {
+          input.setSelectionRange(
+            Math.min(focus.start, focus.end),
+            Math.max(focus.start, focus.end),
+          );
+        } catch {
+          /* 输入框不支持选区时忽略 */
+        }
+      }
+    }
   }
 
   function showToast(message: string): void {
@@ -102,13 +170,16 @@
     const active = view.goals.filter((goal) => goal.status === 'active');
     const done = view.goals.filter((goal) => goal.status === 'done');
 
-    listEl.replaceChildren();
+    // SPEC-031：换树前拍快照，换树后恢复（草稿/滚动/焦点）。
+    const snapshot = captureInteraction();
+    const fragment = document.createDocumentFragment();
     for (const goal of active) {
-      listEl.appendChild(renderGoal(goal));
+      fragment.appendChild(renderGoal(goal, snapshot));
     }
     if (done.length > 0) {
-      listEl.appendChild(renderDoneGroup(done));
+      fragment.appendChild(renderDoneGroup(done, snapshot));
     }
+    listEl.replaceChildren(fragment);
 
     const hasAny = view.goals.length > 0;
     emptyEl.hidden = hasAny;
@@ -116,12 +187,13 @@
     countEl.textContent = `${active.length} 个进行中 · ${done.length} 个已完成`;
 
     renderWarning();
+    restoreInteraction(snapshot);
 
     if (pendingEntryFocus) {
       const goalId = pendingEntryFocus;
       pendingEntryFocus = null;
       const input = listEl.querySelector<HTMLInputElement>(
-        `input[data-entry-input="${goalId}"]`,
+        `input[data-entry-input="${cssEscape(goalId)}"]`,
       );
       input?.focus();
     }
@@ -137,7 +209,7 @@
     }
   }
 
-  function renderDoneGroup(done: AiGoal[]): HTMLElement {
+  function renderDoneGroup(done: AiGoal[], snapshot: InteractionSnapshot): HTMLElement {
     const group = el('section', 'done-group');
     const toggle = el(
       'button',
@@ -153,13 +225,13 @@
     group.appendChild(toggle);
     if (completedOpen) {
       for (const goal of done) {
-        group.appendChild(renderGoal(goal));
+        group.appendChild(renderGoal(goal, snapshot));
       }
     }
     return group;
   }
 
-  function renderGoal(goal: AiGoal): HTMLElement {
+  function renderGoal(goal: AiGoal, snapshot: InteractionSnapshot): HTMLElement {
     const card = el('article', `goal${goal.status === 'done' ? ' is-done' : ''}`);
     card.dataset.goalId = goal.id;
 
@@ -202,7 +274,12 @@
     head.appendChild(expandBtn);
 
     if (editingGoalId === goal.id) {
-      head.appendChild(createTitleEditor(goal));
+      // SPEC-031：编辑中的标题在推送重绘后必须保留用户草稿，不能回退为旧标题。
+      const draft: TitleDraft | null =
+        snapshot.titleDraft !== null
+          ? { value: snapshot.titleDraft, caret: snapshot.titleCaret }
+          : null;
+      head.appendChild(createTitleEditor(goal, draft));
     } else {
       const titleBtn = el('button', 'goal-title', goal.title);
       titleBtn.type = 'button';
@@ -296,11 +373,12 @@
     return card;
   }
 
-  function createTitleEditor(goal: AiGoal): HTMLInputElement {
+  function createTitleEditor(goal: AiGoal, draft: TitleDraft | null): HTMLInputElement {
     const input = el('input', 'goal-title-input') as HTMLInputElement;
     input.type = 'text';
     input.maxLength = 120;
-    input.value = goal.title;
+    input.value = draft?.value ?? goal.title;
+    input.dataset.titleEditor = goal.id;
     input.setAttribute('aria-label', '修改目标标题');
     let finished = false;
 
@@ -336,7 +414,12 @@
     input.addEventListener('blur', commit);
     window.setTimeout(() => {
       input.focus();
-      input.select();
+      const caret = draft?.caret;
+      if (caret) {
+        input.setSelectionRange(Math.min(caret.start, caret.end), Math.max(caret.start, caret.end));
+      } else {
+        input.select();
+      }
     }, 0);
     return input;
   }
@@ -459,7 +542,13 @@
       void (async () => {
         const ok = await run(() => api!.addGoalEntry(goal.id, kind, text));
         if (ok) {
-          input.value = '';
+          // SPEC-031：清空"当前 DOM 中该目标的输入框"，而不是闭包捕获的旧节点——
+          // 推送重绘可能已经把草稿恢复进新输入框，清旧节点会让已提交文字"复活"。
+          const live =
+            listEl.querySelector<HTMLInputElement>(
+              `input[data-entry-input="${cssEscape(goal.id)}"]`,
+            ) ?? input;
+          live.value = '';
         } else {
           pendingEntryFocus = null;
         }
@@ -585,6 +674,14 @@
       if (editingGoalId) {
         editingGoalId = null;
         render();
+        event.preventDefault();
+        return;
+      }
+      // SPEC-033 键盘层级由内向外：标题编辑（上方分支）→ 其它文本输入框
+      // 只失焦、不隐藏、不清草稿（草稿是用户劳动）→ 焦点不在输入框才隐藏窗口。
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        target.blur();
         event.preventDefault();
         return;
       }

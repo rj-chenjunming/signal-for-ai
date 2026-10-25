@@ -495,3 +495,38 @@ describe('formatGoalTime', () => {
     expect(formatGoalTime(at)).toBe('2026-10-22 09:05');
   });
 });
+
+describe('GoalsStore.findGoal / findGoalsByTitle（SPEC-034）', () => {
+  it('findGoal 按 id 返回深拷贝，修改副本不影响仓库；未知 id 返回 undefined', () => {
+    const h = makeStore();
+    h.store.addGoal('目标 A');
+    const id = h.store.getView().goals[0]!.id;
+
+    const found = h.store.findGoal(id);
+    expect(found).toBeDefined();
+    expect(found!.title).toBe('目标 A');
+    found!.title = '篡改';
+    found!.progress = 99;
+    expect(h.store.getView().goals[0]!.title).toBe('目标 A');
+    expect(h.store.getView().goals[0]!.progress).toBe(0);
+
+    expect(h.store.findGoal('no-such-id')).toBeUndefined();
+  });
+
+  it('findGoalsByTitle 返回全部匹配的深拷贝数组，无匹配返回空数组', () => {
+    const h = makeStore();
+    h.store.addGoal('同名');
+    h.store.addGoal('同名');
+    h.store.addGoal('别的');
+
+    const hits = h.store.findGoalsByTitle('同名');
+    expect(hits).toHaveLength(2);
+    for (const goal of hits) {
+      expect(goal.title).toBe('同名');
+    }
+    hits[0]!.title = '篡改';
+    expect(h.store.getView().goals.filter((goal) => goal.title === '同名')).toHaveLength(2);
+
+    expect(h.store.findGoalsByTitle('不存在')).toEqual([]);
+  });
+});

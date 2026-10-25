@@ -15,9 +15,19 @@ const states = ['running', 'waiting', 'success', 'failed', 'starting', 'idle', '
 let fixture;
 let goalsOpened = 0;
 const goalMoves = [];
+const taskActionEvents = [];
 ipcMain.on('ui-fixture', event => { event.returnValue = fixture; });
 ipcMain.on('ui-goal-open', () => { goalsOpened += 1; });
 ipcMain.on('ui-goal-move', (_event, payload) => { goalMoves.push(payload); });
+// SPEC-032：记录夹具渲染器发出的任务行动作（内容仅用于调试，不参与断言）。
+ipcMain.on('ui-task-action', (_event, payload) => { taskActionEvents.push(payload); });
+// SPEC-031 AC-04：收到提交尝试 → 先推送新视图（复现"推送先于 invoke 结果"），再放行失败结果。
+ipcMain.on('ui-entry-attempt', event => {
+  const pushed = JSON.parse(JSON.stringify(goalsFixture()));
+  pushed.goals.find(goal => goal.id === 'g2').entries.push({ id: 'e9', at: Date.now(), kind: 'progress', text: '推送带来的新记录' });
+  event.sender.send('ui-goals-push', pushed);
+  setTimeout(() => event.sender.send('ui-entry-resolve'), 50);
+});
 const results = [];
 function snapshot(count, paused = false, goalsSummary = null) {
   const store = new TaskStore(Array.from({ length: count }, (_, i) => ({ id: `fixture-${i}`, name: ['Codex', 'dsh', 'WorkBuddy'][i % 3], enabled: true, monitor: { type: 'webhook', listen: '127.0.0.1', path: `/fixture/${i}` } })));
@@ -47,6 +57,9 @@ function goalsFixture() {
         entry('e3', now - 60000, 'issue', 'Windows 真机验收还欠一次'),
         entry('e2', now - 3600000, 'progress', 'IPC 与窗口接通'),
         entry('e1', now - 86400000, 'done', '规格与 Red 测试完成'),
+        // SPEC-034：跨年时间线记录——固定时间戳（2025-10-19 14:03 本地时区），
+        // 渲染层必须显示 YYYY-MM-DD HH:mm，与主进程 formatGoalTime 同构。
+        entry('e5', new Date(2025, 9, 19, 14, 3).getTime(), 'progress', '跨年的一条进展记录'),
       ]),
       goal('g2', '把周报整理成模板', 65, 'active', []),
       goal('g3', '读完《设计数据密集型应用》', 20, 'active', []),
@@ -78,6 +91,8 @@ async function checkOverlay(count, dock, goalsSummary = null) {
         const dot = row.querySelector('.strip-dot');
         return {row:rect(row), dot: dot ? rect(dot) : null, svg:!!row.querySelector('svg'), hasDot: !!dot};
       });
+      // SPEC-035 特征锚：状态文案经共享/本地 statusLabel 输出保持一致（首行 running → 「运行中」）。
+      const firstAria = document.querySelector('.strip-row')?.getAttribute('aria-label') ?? null;
       if (rows) { rows.scrollTop=rows.scrollHeight; rows.scrollLeft=rows.scrollWidth; }
       const last=document.querySelector('.strip-row:last-child');
       const toast=document.querySelector('.lamp-toast');
@@ -103,11 +118,18 @@ async function checkOverlay(count, dock, goalsSummary = null) {
         gutterX: rows.offsetWidth - rows.clientWidth,
         gutterY: rows.offsetHeight - rows.clientHeight,
       };
-      return {stripHidden:strip.hidden,coreHidden:core.hidden,bodyWidth:document.body.scrollWidth,bodyHeight:document.body.scrollHeight,points,goal,rowsScroll,last:last&&rect(last),viewport:rect(rows),width:innerWidth,height:innerHeight,toastHeight:toast.offsetHeight,toastWrap:getComputedStyle(toast).whiteSpace};
+      return {stripHidden:strip.hidden,coreHidden:core.hidden,bodyWidth:document.body.scrollWidth,bodyHeight:document.body.scrollHeight,points,firstAria,goal,rowsScroll,last:last&&rect(last),viewport:rect(rows),width:innerWidth,height:innerHeight,toastHeight:toast.offsetHeight,toastWrap:getComputedStyle(toast).whiteSpace,aiUiWired:typeof window.aiUi?.statusLabel==='function'&&typeof window.aiUi?.formatTime==='function'&&typeof window.aiUi?.el==='function'};
     })()`);
     assert.equal(value.stripHidden, !forceStrip); assert.equal(value.coreHidden, forceStrip);
+    // SPEC-035：shared-ui.js 必须先于窗口脚本加载并挂好 window.aiUi。
+    assert.equal(value.aiUiWired, true, 'overlay 页共享助手未接线');
     assert.equal(value.toastWrap, 'nowrap'); assert.ok(value.toastHeight <= 36, 'narrow toast became vertical text');
     assert.ok(value.bodyWidth <= size.width && value.bodyHeight <= size.height, 'body exceeds canvas');
+    // SPEC-035 特征锚：首行 running 的状态文案必须是「运行中」（statusLabel 输出口径）。
+    // count=1 是单灯模式，没有 strip 行，只在灯带形态（count>=2）断言。
+    if (count >= 2) {
+      assert.ok(/运行中$/.test(value.firstAria ?? ''), `overlay 行状态文案漂移：${value.firstAria}`);
+    }
     for (const { row, dot, svg } of value.points.filter(point => point.hasDot)) {
       assert.ok(svg, 'missing local SVG'); assert.ok(row.width >= 32 && row.height >= 32, 'target too small');
       assert.ok(dot.x >= row.x && dot.right <= row.right && dot.y >= row.y && dot.bottom <= row.bottom, 'status dot clipped by target');
@@ -163,11 +185,18 @@ async function checkPanel(theme, count, paused = false, message) {
       const list=document.querySelector('#panel-list'); const first=document.querySelector('.task-row');
       return {empty:!document.querySelector('#panel-empty').hidden,width:document.body.scrollWidth,height:document.body.scrollHeight,scroll:list.scrollHeight>list.clientHeight,
         name:first?.querySelector('.task-name').textContent, injected:!!first?.querySelector('.task-name b'),primary:first?.querySelector('.primary').textContent,
+        statusText:first?.querySelector('.task-status-label')?.textContent ?? null,
+        aiUiWired:typeof window.aiUi?.statusLabel==='function'&&typeof window.aiUi?.formatTime==='function'&&typeof window.aiUi?.el==='function',
         missingLogHidden:first?.querySelector('[data-action="open_log"]').hidden,btn:document.querySelector('#btn-pause').textContent,
         feedback:(()=>{const t=document.querySelector('.panel-toast');if(!t)return null;const r=t.getBoundingClientRect();return {text:t.textContent,width:r.width,bottom:r.bottom,top:r.top,children:t.children.length};})()};
     })()`);
     assert.equal(value.empty, count === 0); assert.ok(value.width <= 420 && value.height <= 520, 'panel body overflow');
-    if (count) { assert.equal(value.primary, '切回工具'); assert.ok(value.missingLogHidden); assert.equal(value.injected, false); }
+    // SPEC-035：shared-ui.js 必须先于窗口脚本加载并挂好 window.aiUi。
+    assert.equal(value.aiUiWired, true, 'panel 页共享助手未接线');
+    if (count) { assert.equal(value.primary, '切回工具'); assert.ok(value.missingLogHidden); assert.equal(value.injected, false);
+      // SPEC-035 特征锚：首行 running 的状态文案以「运行中」开头（panel 侧 label 口径）。
+      // 暂停夹具下标签显示「监控已暂停」，不在此锚的范围内。
+      if (!paused) assert.ok((value.statusText ?? '').startsWith('运行中'), `panel 状态文案漂移：${value.statusText}`); }
     if (count >= 7) assert.ok(value.scroll, 'long panel list must scroll');
     assert.equal(value.btn, paused ? '恢复监控' : '暂停 30 分钟');
     if (message) { assert.equal(value.feedback?.text, message); assert.equal(value.feedback.children, 0); assert.ok(value.feedback.width >= 300 && value.feedback.top >= 0 && value.feedback.bottom <= 520, 'feedback clipped'); }
@@ -195,6 +224,9 @@ async function checkGoals(theme, empty = false) {
           entryCount: document.querySelectorAll('.entry').length,
           entryText: entry ? entry.querySelector('.entry-text').textContent : null,
           entryKind: entry ? entry.querySelector('.entry-kind').textContent : null,
+          crossYearTime: [...document.querySelectorAll('.entry-time')]
+            .find(node => node.textContent.startsWith('2025-10-19'))?.textContent ?? null,
+          aiUiWired:typeof window.aiUi?.statusLabel==='function'&&typeof window.aiUi?.formatTime==='function'&&typeof window.aiUi?.el==='function',
           range: range ? range.value : null,
           warningHidden: document.querySelector('#goals-warning').hidden,
           warningText: document.querySelector('#goals-warning-text').textContent,
@@ -206,6 +238,8 @@ async function checkGoals(theme, empty = false) {
       })));
     })()`);
     assert.ok(value.bodyWidth <= 560 && value.bodyHeight <= 640, 'goals body overflow');
+    // SPEC-035：shared-ui.js 必须先于窗口脚本加载并挂好 window.aiUi（goals.ts 加载即解构）。
+    assert.equal(value.aiUiWired, true, 'goals 页共享助手未接线');
     assert.equal(value.exportText, '导出');
     assert.equal(value.addPlaceholder, '新增目标，回车创建…');
     if (empty) {
@@ -216,10 +250,13 @@ async function checkGoals(theme, empty = false) {
       assert.equal(value.injected, false, 'goal title must be rendered as text');
       assert.ok(value.title.includes('<b>'), 'unsafe title should stay literal text');
       assert.equal(value.count, '5 个进行中 · 1 个已完成');
-      assert.equal(value.entryCount, 3);
+      assert.equal(value.entryCount, 4);
       assert.equal(value.entryKind, '问题');
       assert.equal(value.entryText, 'Windows 真机验收还欠一次');
       assert.equal(value.range, '40');
+      // SPEC-034：跨年条目的时间必须带时间部分，与主进程 formatGoalTime 同构。
+      const crossExpected = '2025-10-19 14:03';
+      assert.equal(value.crossYearTime, crossExpected, 'SPEC-034 跨年时间格式与 formatGoalTime 不一致');
       assert.equal(value.warningHidden, false);
       assert.equal(value.warningText, '主文件损坏，已从备份恢复数据');
       assert.ok(value.deleteLabels.length > 0, 'delete affordances missing');
@@ -255,6 +292,157 @@ async function checkGoals(theme, empty = false) {
     results.push({ role: 'goals', theme, empty, ok: true });
   } finally { win.destroy(); }
 }
+// SPEC-031：数据推送重绘不得破坏输入态（草稿、光标、焦点、滚动）。
+// 每个 AC 独立收集失败，一次 Red 能同时暴露全部缺口；最后统一断言。
+async function checkGoalsInputPreservation(theme) {
+  nativeTheme.themeSource = theme;
+  const view = goalsFixture();
+  const draft = '尚未提交的草稿一句';
+  const win = await page('goals', { width: 560, height: 640 }, { goalsView: view, entrySubmitMode: 'fail-with-push' });
+  const failures = [];
+  const step = async (label, fn) => {
+    try { await fn(); } catch (err) { failures.push(`${label}: ${err.message}`); }
+  };
+  const push = async (mutate) => {
+    const pushed = JSON.parse(JSON.stringify(view));
+    mutate(pushed);
+    win.webContents.send('ui-goals-push', pushed);
+    await new Promise(resolve => setTimeout(resolve, 150));
+  };
+  try {
+    await win.webContents.executeJavaScript(`(() => {
+      document.querySelector('.goal')?.querySelector('.goal-expand')?.click();
+    })()`);
+    await win.webContents.executeJavaScript('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))');
+
+    await step('AC-01 时间线草稿/焦点/光标', async () => {
+      await win.webContents.executeJavaScript(`(() => {
+        const input = document.querySelector('.entry-input');
+        input.value = ${JSON.stringify(draft)};
+        input.focus();
+        input.setSelectionRange(3, 3);
+      })()`);
+      // 推送的新记录必须落在已展开的 g1 上——未展开卡片的时间线本就不在 DOM 里。
+      await push(p => { p.goals.find(g => g.id === 'g1').entries.push({ id: 'e8', at: Date.now(), kind: 'progress', text: '推送带来的新记录' }); });
+      const after = await win.webContents.executeJavaScript(`(() => {
+        const input = document.querySelector('.entry-input');
+        return {
+          value: input?.value ?? null,
+          focused: document.activeElement === input,
+          caret: input === document.activeElement ? input.selectionStart : null,
+          pushedEntry: [...document.querySelectorAll('.entry-text')].some(n => n.textContent === '推送带来的新记录'),
+        };
+      })()`);
+      assert.equal(after.value, draft, '草稿被推送清空');
+      assert.equal(after.focused, true, '焦点丢失');
+      assert.equal(after.caret, 3, '光标位置丢失');
+      assert.equal(after.pushedEntry, true, '推送数据未渲染');
+    });
+
+    await step('AC-03 滚动位置', async () => {
+      await win.webContents.executeJavaScript(`(() => {
+        document.querySelector('#goals-list').scrollTop = 80;
+      })()`);
+      await push(() => undefined);
+      const scrollTop = await win.webContents.executeJavaScript(`document.querySelector('#goals-list').scrollTop`);
+      assert.equal(scrollTop, 80, '滚动位置被重置');
+    });
+
+    await step('AC-02 标题编辑草稿', async () => {
+      await win.webContents.executeJavaScript(`(() => {
+        document.querySelector('.goal')?.querySelector('.goal-title').click();
+        const editor = document.querySelector('.goal-title-input');
+        editor.value = '改了一半的标题';
+        editor.focus();
+        editor.setSelectionRange(4, 4);
+      })()`);
+      await push(p => { p.goals.find(g => g.id === 'g3').progress = 21; });
+      const after = await win.webContents.executeJavaScript(`(() => {
+        const editor = document.querySelector('.goal-title-input');
+        return { value: editor?.value ?? null, focused: document.activeElement === editor };
+      })()`);
+      assert.equal(after.value, '改了一半的标题', '标题草稿被重置为旧标题');
+      assert.equal(after.focused, true, '标题编辑焦点丢失');
+      await win.webContents.executeJavaScript(`(() => {
+        document.querySelector('.goal-title-input')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      })()`);
+    });
+
+    await step('AC-04 提交失败伴随推送时草稿保留', async () => {
+      await win.webContents.executeJavaScript(`(() => {
+        const input = document.querySelector('.entry-input');
+        input.value = '提交失败的草稿';
+        document.querySelector('.entry-submit')?.click();
+      })()`);
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const after = await win.webContents.executeJavaScript(`(() => {
+        const input = document.querySelector('.entry-input');
+        const toast = document.querySelector('#goals-toast');
+        return { value: input?.value ?? null, toast: toast?.textContent ?? null };
+      })()`);
+      assert.equal(after.value, '提交失败的草稿', '失败后草稿被清空');
+      assert.equal(after.toast, '夹具拒绝写入', '失败提示未出现');
+    });
+
+    assert.deepEqual(failures, [], `输入态保护失败 → ${failures.join(' | ')}`);
+    writeFileSync(path.join(out, `goals-input-preservation-${theme}.png`), (await win.webContents.capturePage()).toPNG());
+    results.push({ role: 'goals-input-preservation', theme, ok: true });
+  } finally { win.destroy(); }
+}
+
+// SPEC-032：点击任务行后必须同步进入"跳转中"过渡态，全部请求结算后解除。
+async function checkOverlayJumpFeedback() {
+  const size = resolveCanvasSize(28, 3, 300, 'none', 400, true);
+  const win = await page('overlay', size, { dock: 'none', snapshot: snapshot(3) });
+  const probe = `(() => {
+    const row = document.querySelector('.strip-row');
+    const style = getComputedStyle(row);
+    return {
+      jumping: row.classList.contains('is-jumping'),
+      busy: row.getAttribute('aria-busy'),
+      dimRule: style.transitionProperty.split(',').map(s => s.trim()).includes('opacity'),
+    };
+  })()`;
+  const settle = (value) => win.webContents.send('ui-task-action-resolve', value);
+  try {
+    // 夹具第一行是 running，点击只发 focus_terminal 一条请求。
+    await win.webContents.executeJavaScript(`document.querySelector('.strip-row').click()`);
+    const during = await win.webContents.executeJavaScript(probe);
+    assert.equal(during.jumping, true, 'AC-01 点击后未进入跳转态');
+    assert.equal(during.busy, 'true', 'AC-01 aria-busy 缺失');
+    // 变暗样式已接线（opacity 过渡声明在 .strip-row.is-jumping 上）。
+    // 隐藏夹具窗口不推进过渡帧，像素级变暗由 Windows 真机验收（SPEC-032 测试计划）。
+    assert.equal(during.dimRule, true, 'AC-01 变暗规则未命中行');
+
+    // AC-04：在途时重复点击不闪烁；只结算最早一批后仍保持。
+    await win.webContents.executeJavaScript(`document.querySelector('.strip-row').click()`);
+    const again = await win.webContents.executeJavaScript(probe);
+    assert.equal(again.jumping, true, 'AC-04 重复点击后状态丢失');
+    await settle({ count: 1, value: { ok: true } });
+    await new Promise(resolve => setTimeout(resolve, 120));
+    const partial = await win.webContents.executeJavaScript(probe);
+    assert.equal(partial.jumping, true, 'AC-04 仍有在途请求时提前解除');
+
+    // AC-02：全部结算后解除。
+    await settle({ value: { ok: true } });
+    await new Promise(resolve => setTimeout(resolve, 120));
+    const after = await win.webContents.executeJavaScript(probe);
+    assert.equal(after.jumping, false, 'AC-02 结算后未解除');
+    assert.equal(after.busy, null, 'AC-02 aria-busy 未移除');
+
+    // AC-03：失败结算同样解除（失败提示链路属 SPEC-013，不在本断言范围）。
+    await win.webContents.executeJavaScript(`document.querySelector('.strip-row').click()`);
+    const failedDuring = await win.webContents.executeJavaScript(probe);
+    assert.equal(failedDuring.jumping, true, 'AC-03 失败路径未进入跳转态');
+    await settle({ value: { ok: false, message: '夹具跳转失败' } });
+    await new Promise(resolve => setTimeout(resolve, 120));
+    const failedAfter = await win.webContents.executeJavaScript(probe);
+    assert.equal(failedAfter.jumping, false, 'AC-03 失败结算后未解除');
+
+    results.push({ role: 'overlay-jump-feedback', ok: true });
+  } finally { win.destroy(); }
+}
+
 app.whenReady().then(async () => {
   for (const dock of ['none', 'left', 'right', 'top']) for (const count of [0, 1, 3, 20]) await checkOverlay(count, dock);
   // SPEC-025：目标行（含 0 任务仅目标、以及正常任务数 + 目标行）。
@@ -267,6 +455,10 @@ app.whenReady().then(async () => {
   for (const theme of ['light', 'dark']) { await checkPanel(theme, 7); await checkPanel(theme, 0); await checkPanel(theme, 3, true); }
   for (const theme of ['light', 'dark']) await checkPanel(theme, 3, false, '未找到 dsh 主窗口，请先打开工具后重试。<b>普通文字</b>：C:/example/very-long-path/'.repeat(4));
   for (const theme of ['light', 'dark']) { await checkGoals(theme); await checkGoals(theme, true); }
+  // SPEC-031：输入态保护（推送重绘不丢草稿/焦点/滚动）。
+  for (const theme of ['light', 'dark']) await checkGoalsInputPreservation(theme);
+  // SPEC-032：任务行点击的即时跳转态。
+  await checkOverlayJumpFeedback();
   writeFileSync(path.join(out, 'results.json'), JSON.stringify(results, null, 2));
   console.log(`PASS: ${results.length} real Electron rendering cases; fixtures only; screenshots: ${out}`);
   app.quit();
