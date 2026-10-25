@@ -37,6 +37,7 @@ import { GoalInboxPoller } from './goals-inbox';
 import { createGoalsHandlers } from './goals-ipc';
 import { Notifier } from './notify';
 import { FocusService } from './focus';
+import { FocusWorkerManager } from './focus-worker';
 import { ExtensionBridge } from './extension-bridge';
 import { AutoLaunchService } from './autolaunch';
 import { MonitorHost } from './monitors/host';
@@ -71,6 +72,8 @@ interface AppRefs {
   overlay: OverlayWindow;
   panel: PanelWindow;
   focus: FocusService;
+  /** SPEC-036：常驻焦点 worker（激活走预编译 C#；退出时 kill）。 */
+  focusWorker: FocusWorkerManager;
   /** 浏览器扩展桥接：让点击能在日常浏览器里精确切标签。 */
   extensionBridge: ExtensionBridge;
   notifier: Notifier;
@@ -97,6 +100,8 @@ const refs: AppRefs = {
   overlay: null as unknown as OverlayWindow,
   panel: null as unknown as PanelWindow,
   focus: null as unknown as FocusService,
+  /** SPEC-036：常驻焦点 worker（激活走预编译 C#；退出时 kill）。 */
+  focusWorker: null as unknown as FocusWorkerManager,
   /** 浏览器扩展桥接：让点击能在日常浏览器里精确切标签。 */
   extensionBridge: null as unknown as ExtensionBridge,
   notifier: null as unknown as Notifier,
@@ -312,6 +317,11 @@ async function startApplication(): Promise<void> {
     logger.warn(`浏览器扩展桥接启动失败（扩展切标签将不可用）：${(err as Error).message}`);
   }
 
+  // SPEC-036：常驻焦点 worker——C# 预编译一次，激活走 stdio JSON-lines（毫秒级）；
+  // worker 任何失败都会在 focus 层回落到按次 spawn 路径。退出时随 refs 一并销毁。
+  const focusWorker = new FocusWorkerManager({ logger });
+  refs.focusWorker = focusWorker;
+
   const focus = new FocusService({
     logger,
     // 让窗口枚举知道"配置里显式要求按标题匹配"的窗口 —— 否则非终端窗口
@@ -319,6 +329,7 @@ async function startApplication(): Promise<void> {
     // 传回调而不是快照，热重载后新配置立刻生效。
     tasks: () => configManager.config.tasks,
     extensionActivator: extensionBridge,
+    focusWorker,
     // SPEC-003：扩展不可用而退回"新开页面"时，让用户在浮窗上看见原因，
     // 而不是只能盯着日志猜（沿用既有的一次性 toast 通道）。
     notify: (message) => broadcastToast([overlayWindowOrNull(), null], message),
@@ -485,6 +496,8 @@ async function startApplication(): Promise<void> {
       logger.warn(`目标数据落盘失败：${(err as Error).message}`);
     }
     refs.goalsWindow.destroy();
+    // SPEC-036：常驻焦点 worker 必须随应用退出终止（不留孤儿 powershell）。
+    refs.focusWorker.kill();
   };
 
   app.on('window-all-closed', () => {

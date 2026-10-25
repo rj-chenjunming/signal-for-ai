@@ -250,6 +250,14 @@ export interface FocusServiceOptions {
   /** 浏览器扩展桥接（可选；没装扩展时没有任何影响）。 */
   extensionActivator?: ExtensionActivator;
   /**
+   * 常驻焦点 worker（SPEC-036，可选）。
+   *
+   * 提供时 `activateViaWin32` 优先经 worker 完成（C# 已预编译，省去每次
+   * spawn + Add-Type 的 1–3s 冷启动）；worker 的任何失败都会回落到下面的
+   * 按次 spawn 路径——该路径是行为基线，worker 只是快路径。
+   */
+  focusWorker?: FocusWorkerRequester;
+  /**
    * 需要让用户**看得见**的一次性提示（浮窗 toast）。
    *
    * 为什么需要：点一下 URL 型任务却"多出一个标签页"时，用户不知道是
@@ -267,6 +275,17 @@ export interface FocusServiceOptions {
   tasks?: () => readonly TaskConfig[];
 }
 
+/**
+ * 常驻焦点 worker 的最小接口（SPEC-036，由 `main/focus-worker.ts` 实现）。
+ *
+ * 与 ExtensionActivator 同理用**结构化类型**声明需求，不 import 那个模块，
+ * focus 层保持零额外依赖；测试里塞一个假实现即可。
+ */
+export interface FocusWorkerRequester {
+  /** 执行一个 worker op；任何失败（启动/超时/退出）都应 reject。 */
+  exec(op: string, params: Record<string, unknown>): Promise<{ ok: boolean; detail: string }>;
+}
+
 export class FocusService {
   private readonly spawner: SpawnExecutor;
   private readonly logger: FocusLogger;
@@ -277,6 +296,8 @@ export class FocusService {
   /** 可见提示回调（缺省 undefined = 只记日志）。 */
   private readonly notify: ((message: string) => void) | undefined;
   private readonly options: FocusServiceOptions;
+  /** 常驻焦点 worker（可选；未提供时 activateViaWin32 走原 spawn 路径）。 */
+  private readonly focusWorker: FocusWorkerRequester | undefined;
 
   /**
    * L0 缓存：`wt.exe` 是否可用。
@@ -298,6 +319,7 @@ export class FocusService {
     this.focusTimeoutMs = options.focusTimeoutMs ?? SPAWN_TIMEOUT_MS;
     this.fetchJson = options.fetchJson ?? realJsonFetcher;
     this.extensionActivator = options.extensionActivator;
+    this.focusWorker = options.focusWorker;
     this.notify = options.notify;
     this.options = options;
   }
@@ -350,6 +372,19 @@ export class FocusService {
    *   3. 标题子串 —— **仅兜底**（POC §3 实测有重名歧义）
    */
   async refreshWindows(): Promise<TerminalWindow[]> {
+    // SPEC-037：worker 优先——枚举脚本常驻，省去每次冷启动 + Get-Process。
+    if (this.focusWorker) {
+      try {
+        const viaWorker = await this.focusWorker.exec('enumerate', {});
+        if (viaWorker.ok) {
+          this.knownWindows = this.acceptWindowList(viaWorker.detail);
+          return this.knownWindows;
+        }
+        this.logger.warn('worker 枚举返回失败，回落按次 spawn');
+      } catch (err) {
+        this.logger.warn(`焦点 worker 枚举不可用（${(err as Error).message}），回落按次 spawn`);
+      }
+    }
     // 用 PowerShell 一次性枚举（Add-Type 在沙箱被禁，但 Get-Process 可用）。
     // 只取 MainWindowHandle/Title/ProcessName，不做任何前台查询（POC §5 规避设计）。
     const script = [
@@ -367,8 +402,17 @@ export class FocusService {
       this.knownWindows = [];
       return [];
     }
+    this.knownWindows = this.acceptWindowList(result.stdout);
+    return this.knownWindows;
+  }
+
+  /**
+   * 解析枚举输出（spawn 的 stdout 或 worker 的 detail，格式同体）为候选窗口。
+   * SPEC-037：从 refreshWindows 提取共用，两条路径的判定零差异。
+   */
+  private acceptWindowList(text: string): TerminalWindow[] {
     try {
-      const parsed: unknown = JSON.parse(result.stdout.trim());
+      const parsed: unknown = JSON.parse(text.trim());
       const list = Array.isArray(parsed) ? parsed : [parsed];
       // ★ 这里必须把「配置里显式指定的 windowTitle」一并放行。
       //
@@ -378,7 +422,7 @@ export class FocusService {
       // `Id=15860 Title='WorkBuddy' Handle=722520`），却被这个过滤器丢掉，
       // 最终报"未找到标题匹配「WorkBuddy」的窗口"。
       //
-      // 用户既然在配置里显式写了标题，就是明确要求按标题找 —— 
+      // 用户既然在配置里显式写了标题，就是明确要求按标题找 ——
       // 这条白名单不该拦它。枚举全部窗口不会有害，因为匹配仍由
       // `findWindowByTitle` 按标题做。
       const accepted = this.acceptedTitlePatterns();
@@ -386,14 +430,13 @@ export class FocusService {
         const terminal = task.jump?.terminal;
         return terminal?.type === 'windowProcess' ? terminal.processNames : [];
       });
-      this.knownWindows = list
+      const windows = list
         .map((item) => toTerminalWindow(item, accepted, processes))
         .filter((w): w is TerminalWindow => w !== null);
-      this.logger.info(`已枚举 ${this.knownWindows.length} 个候选窗口`);
-      return this.knownWindows;
+      this.logger.info(`已枚举 ${windows.length} 个候选窗口`);
+      return windows;
     } catch (err) {
       this.logger.warn(`解析窗口枚举结果失败：${(err as Error).message}`);
-      this.knownWindows = [];
       return [];
     }
   }
@@ -449,6 +492,27 @@ export class FocusService {
   }
 
   private async findHiddenWindow(processNames: readonly string[], title: string): Promise<TerminalWindow | null> {
+    // SPEC-037：worker 优先——LampWindowDiscovery 已在常驻进程里预编译。
+    if (this.focusWorker) {
+      try {
+        const viaWorker = await this.focusWorker.exec('hidden', {
+          names: processNames.map((name) => name.toLowerCase().replace(/\.exe$/u, '')),
+        });
+        if (viaWorker.ok) {
+          // fail-closed 解析与 spawn 路径共享同一实现（parseHiddenWindow）。
+          const win = parseHiddenWindow(viaWorker.detail, processNames, title);
+          this.logger.info(
+            win
+              ? `已找到配置进程的隐藏主窗口（worker，pid=${win.pid} hwnd=${win.hwnd}）`
+              : '未找到唯一的隐藏主窗口',
+          );
+          return win;
+        }
+        this.logger.warn('worker 隐藏窗口查询返回失败，回落按次 spawn');
+      } catch (err) {
+        this.logger.warn(`焦点 worker 隐藏查询不可用（${(err as Error).message}），回落按次 spawn`);
+      }
+    }
     try {
       const result = await this.spawner.exec('powershell.exe',
         ['-NoProfile', '-NonInteractive', '-Command', buildHiddenWindowScript(processNames)], this.probeTimeoutMs);
@@ -468,6 +532,21 @@ export class FocusService {
   private async revealNativeWindow(win: TerminalWindow, app: NativeWindowApp): Promise<boolean> {
     if (win.pid === null || win.hwnd === null) return false;
     const profile = NATIVE_WINDOW_APPS[app];
+    // SPEC-037：worker 优先——LampNativeOwner + 单实例 handoff 在常驻进程执行。
+    if (this.focusWorker) {
+      try {
+        const viaWorker = await this.focusWorker.exec('reveal', { pid: win.pid, hwnd: win.hwnd, app });
+        if (viaWorker.ok && viaWorker.detail.includes(profile.marker)) {
+          this.logger.info(`${profile.label} 自身恢复成功（worker），前台 HWND 已确认`);
+          return true;
+        }
+        this.logger.warn(
+          `${profile.label} worker 恢复未确认（${viaWorker.detail.slice(0, 120) || '无输出'}），回落按次 spawn`,
+        );
+      } catch (err) {
+        this.logger.warn(`焦点 worker 恢复不可用（${(err as Error).message}），回落按次 spawn`);
+      }
+    }
     try {
       const result = await this.spawner.exec('powershell.exe',
         ['-NoProfile', '-NonInteractive', '-Command', buildNativeWindowRevealScript(win.pid, win.hwnd, app)], this.focusTimeoutMs);
@@ -906,6 +985,27 @@ export class FocusService {
     if (!Number.isInteger(hwnd) || hwnd <= 0) {
       return { ok: false, detail: 'hwnd 非法' };
     }
+
+    // ★ SPEC-036：优先常驻 worker——C# 已预编译，单次毫秒级，省去每次
+    // spawn + Add-Type 的 1–3s 冷启动。脚本序列与下面的 spawn 路径同体；
+    // worker 的任何失败（不可用/超时/进程退出）都回落到 spawn 路径。
+    if (this.focusWorker) {
+      try {
+        const viaWorker = await this.focusWorker.exec('activate', { hwnd, pid });
+        if (viaWorker.detail === 'stale window') {
+          return { ok: false, detail: 'stale window' };
+        }
+        if (viaWorker.ok) {
+          return { ok: true, detail: 'ok' };
+        }
+        // worker 正常应答但未切到前台：不再用同一脚本重试（结果只会相同），
+        // 交由上层 AppActivate 兜底，语义与 spawn 路径失败一致。
+        return { ok: false, detail: viaWorker.detail };
+      } catch (err) {
+        this.logger.warn(`焦点 worker 不可用（${(err as Error).message}），回落按次 spawn`);
+      }
+    }
+
     const script = [
       "$ErrorActionPreference = 'Stop'",
       'Add-Type -TypeDefinition @"',
